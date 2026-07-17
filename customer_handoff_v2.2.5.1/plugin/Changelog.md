@@ -1,40 +1,10 @@
-# Changelog
+﻿# Changelog
 
-## Version 2.2.7.0
-Focus: **OAPA sub-arcminute convergence** (rebased on top of 2.2.6.3).
-- **Alignment Tolerance now accepts decimals** (e.g. `0.5` = 30 arcseconds). The instruction template bound the field with `UpdateSourceTrigger=PropertyChanged`, which re-parsed the text on every keystroke and silently swallowed the decimal separator — only integers could effectively be typed. The binding now commits on focus loss with `StringFormat 0.##`. Same fix applied to the Options → "Default Alignment Tolerance" field; tooltips and the pre-flight validation message updated accordingly.
-- OAPA: added **self-calibration** with a large lever arm and automatic backlash measurement. New "Self-Calibration" panel in the OAPA control dock:
-  - Sequence per axis: priming move (+45', absorbs pending backlash) → solve → forward leg (+45') → solve → reversal leg (−45') → solve → reverse leg (−45') → solve. Net commanded motion is zero, so the axis returns to its start.
-  - The two single-direction legs are backlash-free and yield the **calibration factor**; the direction-reversal leg comes up short by exactly the mechanical backlash, which is **measured automatically** and shown in the result panel.
-  - **Apply** persists the factors and the measured backlash into the OAPA X/Y backlash compensation settings (previously defaulted to 0 — a major cause of oscillation around ±0.5-1.5' during automated correction).
-  - Direction-consistency check with **automatic Reverse Az/Alt flag correction**: on inconsistency the routine flips the flag, retries once, and persists the flip if the retry passes.
-  - A persistent completion banner stays visible until Apply/Discard; toasts last 30 seconds.
-- OAPA: added separate **Y (Altitude) backlash compensation** setting (`OAPAYBacklashCompensation`), used by the shared backlash-clearing routine on Y direction changes. Avalon UPAS Y backlash remains intentionally a no-op.
-- OAPA: fixed motion completion timeouts at high gear ratios — completion/stuck tolerances now scale with the configured calibration factor, and targets are rounded to the nearest motor step. Firmware (`oapa.ino`): `lround()` instead of `(long)` truncation so small fractional jogs are not silently discarded.
-- OAPA: connection now tries the **last-known-good COM port first** and retries the status probe while the board boots (ESP32 auto-reset), collapsing reconnect time to a single probe.
-- UI: renamed "Gear Ratio" → **"Calibration Factor"** in the OAPA panels (the value is a software calibration constant, not a mechanical reduction). Settings keys unchanged.
-- **Auto-finish now requires 2 consecutive solves** below the alignment tolerance before completing (a single lucky solve can no longer end a non-converged procedure). Motors hold still between the confirmation solves.
-
-## Version 2.2.6.3
-- Improved correction-loop performance by avoiding star detection until a reference star is manually selected, then projecting that locked star between frames and re-detecting only after 120 seconds, a field shift over 0.5 degrees, or an outside-image projection.
-
-## Version 2.2.6.2
-- Fixed TPPA cancellation during plate solving so skipping the sequence item does not surface ASTAP sidecar cleanup errors.
-
-## Version 2.2.6.1
-- Fixed a continuous-solver correction-loop failure when star detection returns no star list while reacquiring the reference star.
-
-## Version 2.2.6.0
-- Reworked the plugin options page into tabbed sections with built-in workflow, accuracy, warning-state, and troubleshooting guidance.
-- Added descriptive tooltips for plugin settings and supported hardware adjustment panels.
-- Added a run checklist and contextual guidance to the polar alignment workflow.
-- Improved the FAQ and plugin description to better explain prerequisites, recommended sky positions, correction behavior, and troubleshooting.
-- Added an experimental continuous error estimator option while keeping the legacy live error calculation as the default.
-- Improved the live correction overlay so target and component lines stay anchored correctly on the selected reference star.
-- Added a warning for correction fields near exact east or west when the experimental continuous estimator is enabled.
-- Improved automated hardware adjustments, including direction handling, backlash behavior, movement timing, and recovery from failed moves.
-- Hid manual hardware controls while automated adjustments are active.
-- Corrected the polar-alignment log path documentation.
+## Version 2.2.5.1
+- OAPA: fixed motion completion timeouts ("Motor appears stuck at position...") when using high gear ratios (e.g. harmonic reducers at 100:1). Tolerance and timeout now scale with the configured gear ratio instead of being fixed.
+- OAPA: targets are now rounded to the nearest motor step before being sent, preventing sub-step oscillation around the goal position at high ratios.
+- OAPA firmware (`oapa.ino` / `src/main.cpp`): replaced `(long)` truncation of jog values with `lround()` so that fractional steps are no longer silently discarded — small commanded moves at high ratios now actually execute.
+- AAPA / Avalon behavior is unchanged (defaults preserved via virtual hooks in the shared base class).
 
 ## Version 2.2.5.0
 - Replaced AAPA/Avalon checkboxes with a single ComboBox selector (None / UPAS / AAPA) per code review feedback
@@ -121,6 +91,7 @@ Focus: **OAPA sub-arcminute convergence** (rebased on top of 2.2.6.3).
 - Make sure your mount is roughly leveled.
 - *Note: For this setting to work, you also need to set the `Polar Alignment Tolerance` to a non-zero value.*
 
+
 ## Version 2.0.2.0
 - Automatically increase search radius on plate solve by 5 during solving of the first three points each time it fails
 
@@ -146,7 +117,7 @@ Focus: **OAPA sub-arcminute convergence** (rebased on top of 2.2.6.3).
 - When refraction correction is enabled, the pole will now also be corrected for it to determine the initial error
 
 ## Version 1.7.0.0
-- Show a loading spinner while a new image is waiting for a solve to update the error details. The spinner is shown in the total error details.
+- Show a loading spinner while a new image is waiting for a solve to update the error details. The spinner is shown in the total error details. 
 - Changed the error circle indicator to draw based on the image scale at 30 arcseconds, 1 arcminute and 5 arcminutes
 - When latitude and longitude is set to 0 it was most likely never set (as these coordinates are inside the Atlantic ocean). A validation will now check for this and notify to set these values.
 - Add a warning when initial error exceeds 2 degrees, that the adjustment phase will be error prone and that it is advised to run it again once the error was reduced
@@ -157,71 +128,88 @@ Focus: **OAPA sub-arcminute convergence** (rebased on top of 2.2.6.3).
 - Added an alignment tolerance to automatically finish polar alignment when below the given threshold
 
 ## Version 1.6.2.0
+
 - Fixed an issue where the polar alignment would fail when output logging was enabled
 
 ## Version 1.6.0.0
+
 - Enhanced the scaling of the error text for smaller resolutions
 - Added an option to account for refraction (which needs further testing in live conditions)
 
 ## Version 1.5.3.0
+
 - Gain should now be prepopulated by plate solve gain setting
 
 ## Version 1.5.1.0
+
 - Added dome support by waiting for the dome to sync after moving the axis for both automated mode as well as manual mode when both the mount and dome is connected
 - Improved manual mode when mount is connected to only get a plate solved image after movement is complete
 - Adjusted status report slightly
 
 ## Version 1.5.0.0
+
 - When moving near the pole in automated mode and having multiple degrees of PA error, the warning that the mount did not move far enough was shown, even when the mount did indeed travel far enough
-- This was caused by comparing the actual solved image RA with the starting RA, but now it will compare the drivers reported RA where the mount thinks it is
-- Comparing the actual solved RA does lead to this error, as the axis of the mount is shifted and the circle is not perfectly aligned with the pole
+	- This was caused by comparing the actual solved image RA with the starting RA, but now it will compare the drivers reported RA where the mount thinks it is
+	- Comparing the actual solved RA does lead to this error, as the axis of the mount is shifted and the circle is not perfectly aligned with the pole
 - Fixed an issue when solving succeeded, but star detection did not detect any stars, that the algorithm should no longer fail but use the center of the image instead
 
 ## Version 1.4.1.0
+
 - With nightly 1.11 #165 the star detector became incompatible. This version will make it compatible again.
 
 ## Version 1.4.0.0
+
 - The plugin now logs the amount of error into `User Documents >> N.I.N.A >> PolarAlignment` when activated in the options
 - Added validation when telescope is connected but at park
 - Fixed that filter is not saved when saving the instruction as part of an advanced sequence
 
 ## Version 1.3.7.0
+
 - In addition to left/right the error display will also include east/west
 - Fixed that the altitude error for southern hemisphere was flipped
 - Added a toggle to be able to start from the current mount position instead of slewing to a specific alt/az
 - Added an expander to the imaging tab tool panel to collapse the options
 
 ## Version 1.3.6.0
+
 - Added the individual steps as progress and mark them visually as completed to give the user a better indication of the completion of individual steps
 - Added a new color option for the completed steps color
 
 ## Version 1.3.5.0
-- The manual mode now also works in full blind mode without any telescope connection. A blind solver needs to be setup.
+
+- The manual mode now also works in full blind mode without any telescope connection. A blind solver needs to be setup - but it must not be astrometry.net due to being too slow.
 - Added the validation messages to imaging dock to see why the routine cannot be started
 
 ## Version 1.3.4.0
+
 - Adjusted plugin description with new markdown syntax
 
 ## Version 1.3.3.0
+
 - Fix DefaultAzimuthOffset to be correctly applied in the southern hemisphere as azimuth 180° + offset (instead of 0° + offset)
 
 ## Version 1.3.2.0
+
 - Remove the compensation when the automated slew did not reach the expected distance. The various mount drivers differ too much to determine a clever compensation model
 - Instead the slew timeout factor can be adjusted. See the [FAQ for details](https://bitbucket.org/Isbeorn/nina.plugins/src/master/NINA.Plugin.Notification/NINA.Plugins.PolarAlignment/FAQ.md)
 - In manual mode, wait for the telescope to not report *slewing* before trying to solve
 
 ## Version 1.3.1.0
+
 - Improved the target distance check for more tolerance and better compensation
 
 ## Version 1.3.0.0
+
 - Added a new "Manual Mode", for mounts that are either no goto mounts or do not implement the necessary interfaces for automated point retrieval
 - Further refactoring to reduce code duplication
 
 ## Version 1.2.2.0
+
 - Added a check, when the target distance was not reached within one degree to reslew again until the target distance is reached. This can happen when the move rate is less than advertised inside the mount driver.
 - Fix an issue when running Three Point Polar Alignment on the imaging tab that it won't be started again after the first iteration.
 
 ## Version 1.2.1.0
+
 - Reveal "Default Altitude Offset" and "Default Azimuth Offset" to alter the initial coordinates that are getting preset
 - Optimize some of the default settings
 - Internal refactorings to reduce code duplications as well as layout improvements
@@ -229,26 +217,33 @@ Focus: **OAPA sub-arcminute convergence** (rebased on top of 2.2.6.3).
 - When starting the polar alignment out of framing the camera will be blocked during the routine, to not allow other areas to take control of the camera.
 
 ## Version 1.2.0.1
+
 - Fixed an issue when moving the axis would traverse over 24h right ascension - leading to an incorrect distance moved
 
 ## Version 1.2.0.0
+
 - The plugin is now also available in the imaging tab to be started directly there instead of inside the sequence.
 - A new button inside the tools pane in the imaging tab on the top right is available to open the polar alignment tool
 
 ## Version 1.1.0.0
+
 - Complete rewrite of the error determination and correction logic to allow for locations further off from celestial pole and meridian
 - Show the initial error amount in smaller numbers below the adjusted error
 - Display a shadow rectangle showing the original error for reference behind the adjustet error rectangle
 
 ## Version 1.0.0.8
+
 - Added a dedicated changelog file to the repository
 - Fix: When using debayered images the plugin would close on the final step with an error
 
 ## Version 1.0.0.7
+
 - Fix: Azimuth error could sometimes exceed 180° instead of showing a negative error instead
 
 ## Version 1.0.0.6
+
 - Fix: Azimuth error for southern hemisphere was calculated incorrectly
 
 ## Version 1.0.0.5
+
 - Initial release using the new plugin manager approach, making the plugin available for download inside N.I.N.A.
