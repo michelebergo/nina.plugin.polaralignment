@@ -117,7 +117,7 @@ The amount of steps to overshoot when a change in direction happens. Set to 0 to
 **Do automated adjustments?**  
 Requires `Use Avalon Polar Alignment System?` to be turned on.  
 When activated, this will connect to the UPA and slowly nudge the UPA to the target position automatically after the error has been determined. The control panel will not be shown as movements are done automatically.  
-Ensure your gear ratio settings are roughly matched so that one step in the UPA results in an arcminute of movement. The default settings should work fine for the standard version of the UPA.  
+Ensure your calibration factor settings are roughly matched so that one step in the UPA results in an arcminute of movement. The default settings should work fine for the standard version of the UPA.  
 Make sure your mount is roughly leveled.  
 *Note: For this setting to work, you also need to set the `Polar Alignment Tolerance` to a non-zero value.*  
 **Automated adjustment settle time**  

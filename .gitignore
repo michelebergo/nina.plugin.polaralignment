@@ -94,3 +94,13 @@ orleans.codegen.cs
 
 # Firmware (managed separately)
 firmware/
+customer_handoff_v2.2.5.1.zip
+customer_handoff_v2.2.5.1/README.md
+customer_handoff_v2.2.5.1/plugin/Changelog.md
+customer_handoff_v2.2.5.1/plugin/NINA.Plugins.PolarAlignment.dll
+customer_handoff_v2.2.6.0/README.md
+customer_handoff_v2.2.6.0/plugin/Changelog.md
+customer_handoff_v2.2.6.0/plugin/NINA.Plugins.PolarAlignment.dll
+customer_handoff_v2.2.6.0.zip
+PolarAlignment/Changelog.md
+PolarAlignment/Changelog.md

@@ -144,6 +144,20 @@ namespace NINA.Plugins.PolarAlignment {
         }
 
         private Movement lastMovement = null;
+
+        // Correction loop tunables.
+        // Dead-band: below this per-axis error, plate-solve noise dominates; moving would thrash.
+        internal const double DeadBandArcmin = 0.15;
+        // Adaptive gain: aggressive while far from the pole, gentle for the final approach.
+        internal const double FarGain = 0.9;
+        internal const double NearGain = 0.6;
+        internal const double FarThresholdArcmin = 2.0;
+
+        internal static float AxisAdjustment(double errorArcmin, float sign) {
+            var gain = Math.Abs(errorArcmin) > FarThresholdArcmin ? FarGain : NearGain;
+            return (float)(errorArcmin * gain) * sign;
+        }
+
         public async Task MoveCloser(IProgress<ApplicationStatus> progress, CancellationToken token) {
             var activeSystem = ActiveAlignmentSystemVM;
             if (activeSystem == null || !activeSystem.DoAutomatedAdjustments) { return; }
@@ -154,31 +168,46 @@ namespace NINA.Plugins.PolarAlignment {
             var azimuthSign = lastMovement?.AzimuthSign ?? 1f;
             var altitudeSign = lastMovement?.AltitudeSign ?? 1f;
             if (lastMovement != null) {
-                if (lastMovement?.Altitude == 0) {
-                    if (lastMovement.Azimuth != 0 && Math.Abs(az.Degree) > Math.Abs(lastMovement.AzimuthErrorBeforeMovement * 1.15d)) {
-                        Logger.Info($"Reversing x axis movement as azimuth error is worse than before. Before: {lastMovement.AzimuthErrorBeforeMovement} - After: {az.Degree}");
-                        azimuthSign = -1f * lastMovement.AzimuthSign;
-                    }
-                } else if (lastMovement?.Azimuth == 0) {
-                    if (lastMovement.Altitude != 0 && Math.Abs(alt.Degree) > Math.Abs(lastMovement.AltitudeErrorBeforeMovement * 1.15d)) {
-                        Logger.Info($"Reversing y axis movement as altitude error is worse than before. Before: {lastMovement.AltitudeErrorBeforeMovement} - After: {alt.Degree}");
-                        altitudeSign = -1f * lastMovement.AltitudeSign;
-                    }
+                // Per-axis reversal check: only flip when this axis was actually moved last
+                // iteration and its error got worse by more than measurement noise.
+                if (lastMovement.Azimuth != 0
+                    && Math.Abs(az.Degree) > Math.Abs(lastMovement.AzimuthErrorBeforeMovement * 1.15d)
+                    && Math.Abs(az.ArcMinutes) - Math.Abs(lastMovement.AzimuthErrorBeforeMovement * 60d) > DeadBandArcmin) {
+                    Logger.Info($"Reversing x axis movement as azimuth error is worse than before. Before: {lastMovement.AzimuthErrorBeforeMovement} - After: {az.Degree}");
+                    azimuthSign = -1f * lastMovement.AzimuthSign;
+                }
+                if (lastMovement.Altitude != 0
+                    && Math.Abs(alt.Degree) > Math.Abs(lastMovement.AltitudeErrorBeforeMovement * 1.15d)
+                    && Math.Abs(alt.ArcMinutes) - Math.Abs(lastMovement.AltitudeErrorBeforeMovement * 60d) > DeadBandArcmin) {
+                    Logger.Info($"Reversing y axis movement as altitude error is worse than before. Before: {lastMovement.AltitudeErrorBeforeMovement} - After: {alt.Degree}");
+                    altitudeSign = -1f * lastMovement.AltitudeSign;
                 }
             }
 
-            var xGreaterThanY = Math.Abs(az.Degree) > Math.Abs(alt.Degree);
-            if (xGreaterThanY) {
-                float azAdjustment = (float)az.ArcMinutes * azimuthSign * 0.75f;
+            // Dual-axis correction: move both axes in the same iteration, then settle once.
+            var moveAz = Math.Abs(az.ArcMinutes) > DeadBandArcmin;
+            var moveAlt = Math.Abs(alt.ArcMinutes) > DeadBandArcmin;
+
+            if (!moveAz && !moveAlt) {
+                Logger.Info($"Both axis errors within dead-band ({DeadBandArcmin}'): Az {Math.Round(az.ArcMinutes, 2)}', Alt {Math.Round(alt.ArcMinutes, 2)}'. Skipping adjustment.");
+                return;
+            }
+
+            float azAdjustment = 0f;
+            float altAdjustment = 0f;
+
+            if (moveAz) {
+                azAdjustment = AxisAdjustment(az.ArcMinutes, azimuthSign);
                 progress?.Report(new ApplicationStatus() { Status = $"Nudging along X axis by {Math.Round(azAdjustment, 2)}" });
                 await activeSystem.NudgeX(azAdjustment, token);
-                lastMovement = new Movement(azAdjustment, 0, azimuthSign, lastMovement?.AltitudeSign ?? 1f, az.Degree, alt.Degree);
-            } else {
-                float altAdjustment = (float)alt.ArcMinutes * altitudeSign * 0.75f;
+            }
+            if (moveAlt) {
+                altAdjustment = AxisAdjustment(alt.ArcMinutes, altitudeSign);
                 progress?.Report(new ApplicationStatus() { Status = $"Nudging along Y axis by {Math.Round(altAdjustment, 2)}" });
                 await activeSystem.NudgeY(altAdjustment, token);
-                lastMovement = new Movement(0, altAdjustment, lastMovement?.AzimuthSign ?? 1f, altitudeSign, az.Degree, alt.Degree);
             }
+
+            lastMovement = new Movement(azAdjustment, altAdjustment, azimuthSign, altitudeSign, az.Degree, alt.Degree);
 
             await CoreUtil.Wait(TimeSpan.FromSeconds(activeSystem.AutomatedAdjustmentSettleTime), token, progress, "Settling");
         }

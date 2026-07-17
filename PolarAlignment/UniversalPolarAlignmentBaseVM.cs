@@ -44,6 +44,7 @@ namespace NINA.Plugins.PolarAlignment {
         public abstract bool ReverseAzimuth { get; set; }
         public abstract bool ReverseAltitude { get; set; }
         public abstract float XBacklashCompensation { get; set; }
+        public abstract float YBacklashCompensation { get; set; }
 
         [ObservableProperty]
         [NotifyCanExecuteChangedFor(nameof(NudgeXCommand))]
@@ -95,7 +96,7 @@ namespace NINA.Plugins.PolarAlignment {
                 var lastDirection = upa.XLastDirection;
                 await upa.MoveRelative(Axis.XAxis, XSpeed, position, token).ConfigureAwait(false);
                 var currentDirection = upa.XLastDirection;
-                await ClearBacklash(lastDirection, currentDirection, token);
+                await ClearBacklash(Axis.XAxis, XSpeed, XBacklashCompensation, lastDirection, currentDirection, token);
             } catch (Exception ex) {
                 Logger.Error(ex);
                 if (ex is TimeoutException) {
@@ -113,7 +114,10 @@ namespace NINA.Plugins.PolarAlignment {
                 await Application.Current.Dispatcher.BeginInvoke(() => IsNotMoving = false);
 
                 Logger.Info($"Nudging {SystemName} along Y axis by {position}");
+                var lastDirection = upa.YLastDirection;
                 await upa.MoveRelative(Axis.YAxis, YSpeed, position, token).ConfigureAwait(false);
+                var currentDirection = upa.YLastDirection;
+                await ClearBacklash(Axis.YAxis, YSpeed, YBacklashCompensation, lastDirection, currentDirection, token);
             } catch (Exception ex) {
                 Logger.Error(ex);
                 if (ex is TimeoutException) {
@@ -141,7 +145,7 @@ namespace NINA.Plugins.PolarAlignment {
 
                 await upa.MoveAbsolute(Axis.XAxis, XSpeed, target, token).ConfigureAwait(false);
                 var currentDirection = upa.XLastDirection;
-                await ClearBacklash(lastDirection, currentDirection, token);
+                await ClearBacklash(Axis.XAxis, XSpeed, XBacklashCompensation, lastDirection, currentDirection, token);
             } catch (Exception ex) {
                 Logger.Error(ex);
                 if (ex is TimeoutException) {
@@ -152,12 +156,12 @@ namespace NINA.Plugins.PolarAlignment {
             }
         }
 
-        private async Task ClearBacklash(LastDirection lastDirection, LastDirection currentDirection, CancellationToken token) {
+        private async Task ClearBacklash(Axis axis, int speed, float compensation, LastDirection lastDirection, LastDirection currentDirection, CancellationToken token) {
             if (lastDirection != currentDirection) {
-                if (Math.Abs(XBacklashCompensation) > 0) {
-                    Logger.Info("Direction changed. Clearing backlash");
-                    await upa.MoveRelative(Axis.XAxis, XSpeed, -XBacklashCompensation, token).ConfigureAwait(false);
-                    await upa.MoveRelative(Axis.XAxis, XSpeed, XBacklashCompensation, token).ConfigureAwait(false);
+                if (Math.Abs(compensation) > 0) {
+                    Logger.Info($"Direction changed on {axis}. Clearing backlash");
+                    await upa.MoveRelative(axis, speed, -compensation, token).ConfigureAwait(false);
+                    await upa.MoveRelative(axis, speed, compensation, token).ConfigureAwait(false);
                 }
             }
         }
@@ -171,7 +175,10 @@ namespace NINA.Plugins.PolarAlignment {
                 if (ReverseAltitude) { target = target * -1; }
 
                 Logger.Info($"Moving {SystemName} along Y axis to {target}");
+                var lastDirection = upa.YLastDirection;
                 await upa.MoveAbsolute(Axis.YAxis, YSpeed, target, token).ConfigureAwait(false);
+                var currentDirection = upa.YLastDirection;
+                await ClearBacklash(Axis.YAxis, YSpeed, YBacklashCompensation, lastDirection, currentDirection, token);
             } catch (Exception ex) {
                 Logger.Error(ex);
                 if (ex is TimeoutException) {

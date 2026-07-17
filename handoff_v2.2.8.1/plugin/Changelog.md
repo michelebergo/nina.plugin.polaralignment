@@ -1,22 +1,5 @@
 ﻿# Changelog
 
-## Version 2.2.9.0
-Focus: **sub-arcminute convergence**. Addresses beta-tester reports that the automated correction loop could not settle below ~1 arcminute.
-- **Alignment Tolerance now accepts decimals** (e.g. `0.5` = 30 arcseconds). The instruction template bound the field with `UpdateSourceTrigger=PropertyChanged`, which re-parsed the text on every keystroke and silently swallowed the decimal separator — only integers could effectively be typed. The binding now commits on focus loss with `StringFormat 0.##`. Same fix applied to the Options → "Default Alignment Tolerance" field. Tooltips and the pre-flight validation message updated accordingly.
-- OAPA self-calibration reworked for a **10× longer lever arm with automatic backlash measurement**:
-  - Calibration step raised from 5' to **45'** per leg. Plate-solve noise (2-5") is now <1% of the measured displacement instead of ~5-10%.
-  - New sequence per axis: priming move (absorbs any pending backlash) → solve → forward leg → solve → reversal leg → solve → reverse leg → solve. Net commanded motion is zero, so the axis returns to its starting position.
-  - The two single-direction legs are backlash-free and yield the **calibration factor**; the direction-reversal leg comes up short by exactly the mechanical backlash, which is now **measured automatically** and shown in the result panel.
-  - Clicking **Apply** now persists the measured backlash into the OAPA X/Y backlash compensation settings (previously defaulted to 0 — the main cause of oscillation around ±0.5-1.5').
-- Correction loop (`MoveCloser`) reworked, inspired by the AAPA companion-app algorithm:
-  - **Dual-axis correction**: both azimuth and altitude are adjusted in every iteration (previously one axis per iteration), roughly halving the number of exposure/solve/settle cycles.
-  - **Adaptive gain**: 0.9 while the axis error is above 2', 0.6 below (previously fixed 0.75) — aggressive far from the pole, gentle on final approach.
-  - **Dead-band of 0.15' per axis**: below that, plate-solve noise dominates and the motor no longer chases it.
-  - The direction-reversal heuristic now requires the error to worsen by more than the dead-band in addition to the previous 15% margin, eliminating spurious sign flips near the target.
-- **Auto-finish now requires 2 consecutive solves** below the alignment tolerance before completing (a single lucky solve can no longer end a non-converged procedure). Motors hold still between the two confirmation solves.
-- New pre-flight warning when the alignment tolerance is set below 1.5× the dead-band (< ~0.23'), where the loop may not be able to converge.
-- Test suite: fixed pre-existing compilation errors (missing `declinationSpreadArcsec` argument) and added unit tests for the new gain/dead-band logic.
-
 ## Version 2.2.8.1
 - OAPA self-calibration: completion popup is now **much harder to miss**. Two complementary fixes addressing beta-tester reports that the post-calibration toast appeared on only 1 of 3 consecutive runs:
   - The bottom-right toast (`Notification.ShowInformation`) now stays visible for **30 seconds** instead of the default 10 seconds. Same for the "Calibration factors updated" toast after Apply.

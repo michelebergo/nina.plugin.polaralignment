@@ -55,6 +55,7 @@
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
                 <TextBlock VerticalAlignment="Center" Text="Default Move Rate" />
                 <TextBox
@@ -158,7 +159,7 @@
                     VerticalAlignment="Center"
                     Text="Default Alignment Tolerance">
                     <TextBlock.ToolTip>
-                        <TextBlock Text="Setting the Polar Alignment Tolerance to non-zero will specify a tolerance in arcminutes where the polar alignment routine automatically completes when below the threshold" />
+                        <TextBlock Text="Setting the Polar Alignment Tolerance to non-zero will specify a tolerance in arcminutes where the polar alignment routine automatically completes when below the threshold. Decimal values are allowed, e.g. 0.5 for 30 arcseconds" />
                     </TextBlock.ToolTip>
                 </TextBlock>
                 <ninactrl:UnitTextBox
@@ -168,7 +169,7 @@
                     Margin="5,5,0,0"
                     HorizontalAlignment="Left"
                     VerticalAlignment="Center"
-                    Text="{Binding AlignmentTolerance}"
+                    Text="{Binding AlignmentTolerance, StringFormat={}{0:0.##}}"
                     Unit="arcmin" />
 
                 <TextBlock
@@ -360,10 +361,26 @@
                     Grid.Row="22"
                     Margin="0,5,0,0"
                     VerticalAlignment="Center"
+                    Text="Altitude backlash compensation"
+                    Visibility="{Binding IsOAPASelected, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                <ninactrl:UnitTextBox
+                    Grid.Row="22"
+                    Grid.Column="1"
+                    MinWidth="80"
+                    Margin="0,5,0,0"
+                    HorizontalAlignment="Left"
+                    VerticalAlignment="Center"
+                    Text="{Binding ActiveSystem.YBacklashCompensation}"
+                    Unit="steps"
+                    Visibility="{Binding IsOAPASelected, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                <TextBlock
+                    Grid.Row="23"
+                    Margin="0,5,0,0"
+                    VerticalAlignment="Center"
                     Text="Do automated adjustments?"
                     Visibility="{Binding IsSystemSelected, Converter={StaticResource BooleanToVisibilityConverter}}" />
                 <StackPanel
-                    Grid.Row="22"
+                    Grid.Row="23"
                     Grid.Column="1"
                     Orientation="Horizontal">
                     <CheckBox
@@ -382,7 +399,7 @@
                             Visibility="{Binding ActiveSystem.DoAutomatedAdjustments, Converter={StaticResource BooleanToVisibilityConverter}}" />
                     </Grid>
                 </StackPanel>
-                <Grid Grid.Row="23" Visibility="{Binding IsSystemSelected, Converter={StaticResource BooleanToVisibilityConverter}}">
+                <Grid Grid.Row="24" Visibility="{Binding IsSystemSelected, Converter={StaticResource BooleanToVisibilityConverter}}">
                     <TextBlock
                         Margin="0,5,0,0"
                         VerticalAlignment="Center"
@@ -390,7 +407,7 @@
                         Visibility="{Binding ActiveSystem.DoAutomatedAdjustments, Converter={StaticResource BooleanToVisibilityConverter}}" />
                 </Grid>
                 <Grid
-                    Grid.Row="23"
+                    Grid.Row="24"
                     Grid.Column="1"
                     Visibility="{Binding IsSystemSelected, Converter={StaticResource BooleanToVisibilityConverter}}">
                     <ninactrl:UnitTextBox
@@ -403,17 +420,17 @@
                         Visibility="{Binding ActiveSystem.DoAutomatedAdjustments, Converter={StaticResource BooleanToVisibilityConverter}}" />
                 </Grid>
                 <Grid
-                    Grid.Row="24"
+                    Grid.Row="25"
                     Grid.ColumnSpan="2"
                     Visibility="{Binding IsSystemSelected, Converter={StaticResource BooleanToVisibilityConverter}}">
                     <TextBlock
                         Margin="0,5,0,0"
                         FontStyle="Italic"
-                        Text="Make sure to set your gear ratio to achieve 1 arcminute per step for each axis!"
+                        Text="Make sure to set your calibration factor to achieve 1 arcminute per step for each axis!"
                         Visibility="{Binding ActiveSystem.DoAutomatedAdjustments, Converter={StaticResource BooleanToVisibilityConverter}}" />
                 </Grid>
                 <Button
-                    Grid.Row="25"
+                    Grid.Row="26"
                     Margin="0,20,0,0"
                     Command="{Binding ResetSettingsCommand}">
                     <TextBlock
@@ -458,7 +475,7 @@
                             <ColumnDefinition />
                             <ColumnDefinition />
                         </Grid.ColumnDefinitions>
-                        <Button Command="{Binding ConnectCommand}" Visibility="{Binding Connected, Converter={StaticResource InverseBooleanToVisibilityCollapsedConverter}}">Test Connect</Button>
+                        <Button Command="{Binding ConnectCommand}" Visibility="{Binding Connected, Converter={StaticResource InverseBooleanToVisibilityCollapsedConverter}}">Connect</Button>
                         <Button Command="{Binding DisconnectCommand}" Visibility="{Binding Connected, Converter={StaticResource BooleanToVisibilityConverter}}">Disconnect</Button>
                     </Grid>
                     <ContentPresenter Grid.Row="1" Content="{Binding UniversalPolarAlignmentOAPAVM}" />
@@ -1416,7 +1433,7 @@
                             Grid.Column="2"
                             Margin="5,0,0,0"
                             VerticalAlignment="Center">
-                            GearRatio
+                            Calibration Factor
                         </TextBlock>
                         <TextBox
                             Grid.Column="3"
@@ -1550,7 +1567,7 @@
                             Grid.Column="2"
                             Margin="5,0,0,0"
                             VerticalAlignment="Center">
-                            GearRatio
+                            Calibration Factor
                         </TextBlock>
                         <TextBox
                             Grid.Column="3"
