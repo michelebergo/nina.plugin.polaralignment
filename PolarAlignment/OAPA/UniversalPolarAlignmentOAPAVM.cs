@@ -253,11 +253,11 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
 
                     Logger.Info("OAPA self-calibration started");
 
-                    var (xRatio, xBacklash, xConsistent, xFlipped) = await CalibrateAxisWithAutoReverseAsync(
+                    var (xRatio, xBacklash, xConsistent, xAsymmetric, xFlipped) = await CalibrateAxisWithAutoReverseAsync(
                         Axis.XAxis, XSpeed, XGearRatio,
                         () => ReverseAzimuth, v => ReverseAzimuth = v,
                         "X (Azimuth)", token);
-                    var (yRatio, yBacklash, yConsistent, yFlipped) = await CalibrateAxisWithAutoReverseAsync(
+                    var (yRatio, yBacklash, yConsistent, yAsymmetric, yFlipped) = await CalibrateAxisWithAutoReverseAsync(
                         Axis.YAxis, YSpeed, YGearRatio,
                         () => ReverseAltitude, v => ReverseAltitude = v,
                         "Y (Altitude)", token);
@@ -272,6 +272,10 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
                             : "Direction consistency: OK (" + string.Join(", ", notes) + ")";
                     } else {
                         consistencyMsg = $"Direction consistency: WARNING (X={(xConsistent ? "ok" : "fail")}, Y={(yConsistent ? "ok" : "fail")}). Auto-flip did not resolve it; check wiring.";
+                    }
+                    if (xAsymmetric || yAsymmetric) {
+                        var axes = xAsymmetric && yAsymmetric ? "X and Y" : (xAsymmetric ? "X" : "Y");
+                        consistencyMsg += $" ⚠ Forward/reverse legs on {axes} differ by more than 20%: the discovered values may be unreliable. Re-run with the scope pointing at a lower-altitude, star-rich field.";
                     }
 
                     await Application.Current.Dispatcher.BeginInvoke(() => {
@@ -338,86 +342,157 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
         /// return the corrected ratio. If it still fails, restore the original flag and
         /// surface the inconsistent first-pass result.
         /// </summary>
-        private async Task<(float ratio, float backlashArcmin, bool consistent, bool flipped)> CalibrateAxisWithAutoReverseAsync(
+        private async Task<(float ratio, float backlashArcmin, bool consistent, bool asymmetric, bool flipped)> CalibrateAxisWithAutoReverseAsync(
             Axis axis, int speed, float currentRatio,
             Func<bool> getReverse, Action<bool> setReverse,
             string axisLabel, CancellationToken token) {
 
             bool originalReverse = getReverse();
-            var (ratio, backlash, consistent) = await CalibrateAxisAsync(axis, speed, currentRatio, originalReverse, axisLabel, token);
-            if (consistent) { return (ratio, backlash, true, false); }
+            var (ratio, backlash, consistent, asymmetric) = await CalibrateAxisAsync(axis, speed, currentRatio, originalReverse, axisLabel, token);
+            if (consistent) { return (ratio, backlash, true, asymmetric, false); }
 
             Logger.Info($"OAPA cal {axisLabel}: direction inconsistent, retrying with Reverse flipped ({originalReverse} -> {!originalReverse})");
             await SetStatusAsync($"{axisLabel}: auto-flipping Reverse and retrying...");
 
-            var (ratio2, backlash2, consistent2) = await CalibrateAxisAsync(axis, speed, currentRatio, !originalReverse, axisLabel, token);
+            var (ratio2, backlash2, consistent2, asymmetric2) = await CalibrateAxisAsync(axis, speed, currentRatio, !originalReverse, axisLabel, token);
             if (consistent2) {
                 await Application.Current.Dispatcher.BeginInvoke(() => setReverse(!originalReverse));
                 Logger.Info($"OAPA cal {axisLabel}: auto-flip succeeded, persisted Reverse={!originalReverse}, ratio={ratio2:F2}");
-                return (ratio2, backlash2, true, true);
+                return (ratio2, backlash2, true, asymmetric2, true);
             }
 
             Logger.Warning($"OAPA cal {axisLabel}: auto-flip did not resolve inconsistency; keeping original Reverse={originalReverse}");
-            return (ratio, backlash, false, false);
+            return (ratio, backlash, false, asymmetric, false);
         }
 
         /// <summary>
         /// Large-lever calibration with backlash measurement.
-        /// Sequence: prime +S (absorbs any pending backlash), solve A, +S, solve B, -S, solve C, -S, solve D.
+        /// Sequence: baseline solve (fail-fast before any motion), prime +S (absorbs any pending
+        /// backlash), solve A, +S, solve B, -S, solve C, -S, solve D.
         /// The A->B (forward) and C->D (reverse) legs are single-direction and therefore backlash-free,
         /// yielding the gear ratio. The B->C reversal leg comes up short by exactly the backlash amount.
-        /// Net commanded motion is zero, so the axis ends where it started.
+        /// Net commanded motion is zero, so the axis ends where it started; on mid-sequence failure the
+        /// accumulated commanded motion is driven back before rethrowing.
+        /// Azimuth sky displacements are divided by cos(field altitude): a base rotation of θ in azimuth
+        /// moves a field at altitude h by only θ·cos(h), so uncorrected factors would depend on where
+        /// the scope happens to point.
         /// </summary>
-        private async Task<(float ratio, float backlashArcmin, bool consistent)> CalibrateAxisAsync(
+        private async Task<(float ratio, float backlashArcmin, bool consistent, bool asymmetric)> CalibrateAxisAsync(
             Axis axis, int speed, float currentRatio, bool reversed, string axisLabel, CancellationToken token) {
 
             float commanded = CalibrationStepArcmin;
             float step = reversed ? -commanded : commanded;
 
-            await SetStatusAsync($"{axisLabel}: priming +{commanded:F0}'...");
-            await upa.MoveRelative(axis, speed, step, token).ConfigureAwait(false);
-            var solveA = await CaptureAndSolveWithRetryAsync(token);
-            token.ThrowIfCancellationRequested();
+            // Fail fast on an unsolvable field before commanding any motion.
+            await SetStatusAsync($"{axisLabel}: baseline solve...");
+            var baseline = await CaptureAndSolveWithRetryAsync(token);
 
-            await SetStatusAsync($"{axisLabel}: forward leg +{commanded:F0}'...");
-            await upa.MoveRelative(axis, speed, step, token).ConfigureAwait(false);
-            var solveB = await CaptureAndSolveWithRetryAsync(token);
-            token.ThrowIfCancellationRequested();
-
-            await SetStatusAsync($"{axisLabel}: reversal leg -{commanded:F0}'...");
-            await upa.MoveRelative(axis, speed, -step, token).ConfigureAwait(false);
-            var solveC = await CaptureAndSolveWithRetryAsync(token);
-            token.ThrowIfCancellationRequested();
-
-            await SetStatusAsync($"{axisLabel}: reverse leg -{commanded:F0}'...");
-            await upa.MoveRelative(axis, speed, -step, token).ConfigureAwait(false);
-            var solveD = await CaptureAndSolveWithRetryAsync(token);
-
-            var forwardArcmin = AngularSeparationDegrees(solveA, solveB) * 60.0;
-            var reversalArcmin = AngularSeparationDegrees(solveB, solveC) * 60.0;
-            var reverseArcmin = AngularSeparationDegrees(solveC, solveD) * 60.0;
-
-            if (forwardArcmin < 0.1 || reverseArcmin < 0.1) {
-                throw new InvalidOperationException($"{axisLabel}: axis did not move measurably; check clutch and motor current");
+            if (axis == Axis.XAxis) {
+                var baselineAlt = FieldAltitudeDegrees(baseline);
+                if (Math.Cos(baselineAlt * Math.PI / 180.0) < MinimumAzimuthCosAltitude) {
+                    throw new InvalidOperationException(
+                        $"{axisLabel}: field altitude {baselineAlt:F0}\u00b0 is too close to the zenith for azimuth calibration. " +
+                        "Point the scope at a lower altitude (ideally toward the celestial pole) and retry.");
+                }
             }
 
-            var cleanArcmin = (forwardArcmin + reverseArcmin) / 2.0;
-            float observedRatio = (float)(currentRatio * (commanded / cleanArcmin));
+            float movedArcmin = 0f;
+            try {
+                await SetStatusAsync($"{axisLabel}: priming +{commanded:F0}'...");
+                await upa.MoveRelative(axis, speed, step, token).ConfigureAwait(false);
+                movedArcmin += step;
+                var solveA = await CaptureAndSolveWithRetryAsync(token);
+                token.ThrowIfCancellationRequested();
 
-            // The reversal leg lost this much commanded motion to backlash.
-            var backlash = (float)(commanded * (1.0 - reversalArcmin / cleanArcmin));
-            if (backlash < 0f) {
-                backlash = 0f;
-            } else if (backlash > commanded / 2f) {
-                Logger.Warning($"OAPA cal {axisLabel}: measured backlash {backlash:F2}' exceeds half the calibration step; clamping. Check for mechanical slippage.");
-                backlash = commanded / 2f;
+                await SetStatusAsync($"{axisLabel}: forward leg +{commanded:F0}'...");
+                await upa.MoveRelative(axis, speed, step, token).ConfigureAwait(false);
+                movedArcmin += step;
+                var solveB = await CaptureAndSolveWithRetryAsync(token);
+                token.ThrowIfCancellationRequested();
+
+                await SetStatusAsync($"{axisLabel}: reversal leg -{commanded:F0}'...");
+                await upa.MoveRelative(axis, speed, -step, token).ConfigureAwait(false);
+                movedArcmin -= step;
+                var solveC = await CaptureAndSolveWithRetryAsync(token);
+                token.ThrowIfCancellationRequested();
+
+                await SetStatusAsync($"{axisLabel}: reverse leg -{commanded:F0}'...");
+                await upa.MoveRelative(axis, speed, -step, token).ConfigureAwait(false);
+                movedArcmin -= step;
+                var solveD = await CaptureAndSolveWithRetryAsync(token);
+
+                var forwardArcmin = AxisDisplacementArcmin(axis, solveA, solveB);
+                var reversalArcmin = AxisDisplacementArcmin(axis, solveB, solveC);
+                var reverseArcmin = AxisDisplacementArcmin(axis, solveC, solveD);
+
+                if (forwardArcmin < 0.1 || reverseArcmin < 0.1) {
+                    throw new InvalidOperationException($"{axisLabel}: axis did not move measurably; check clutch and motor current");
+                }
+
+                var cleanArcmin = (forwardArcmin + reverseArcmin) / 2.0;
+                float observedRatio = (float)(currentRatio * (commanded / cleanArcmin));
+
+                // The reversal leg lost this much commanded motion to backlash.
+                var backlash = (float)(commanded * (1.0 - reversalArcmin / cleanArcmin));
+                if (backlash < 0f) {
+                    backlash = 0f;
+                } else if (backlash > commanded / 2f) {
+                    Logger.Warning($"OAPA cal {axisLabel}: measured backlash {backlash:F2}' exceeds half the calibration step; clamping. Check for mechanical slippage.");
+                    backlash = commanded / 2f;
+                }
+
+                // The two clean legs measure the same physical motion; a large mismatch means the
+                // measurement itself is unreliable (field drift, flexure, slipping mechanics).
+                var asymmetry = Math.Abs(forwardArcmin - reverseArcmin) / Math.Max(forwardArcmin, reverseArcmin);
+                bool asymmetric = asymmetry > 0.20;
+                if (asymmetric) {
+                    Logger.Warning($"OAPA cal {axisLabel}: forward ({forwardArcmin:F2}') and reverse ({reverseArcmin:F2}') legs differ by {asymmetry:P0}; discovered values may be unreliable");
+                }
+
+                // Direction consistency: forward and reversal legs must be antiparallel on the tangent plane.
+                bool consistent = TangentDotProduct(solveA, solveB, solveB, solveC) < 0;
+
+                Logger.Info($"OAPA cal {axisLabel}: forward={forwardArcmin:F2}', reversal={reversalArcmin:F2}', reverse={reverseArcmin:F2}', ratio={observedRatio:F2}, backlash={backlash:F2}', consistent={consistent}, asymmetric={asymmetric}");
+                return (observedRatio, backlash, consistent, asymmetric);
+            } catch (Exception) when (movedArcmin != 0f) {
+                // Best-effort: drive the axis back to its starting position before surfacing the error.
+                Logger.Info($"OAPA cal {axisLabel}: failure with {movedArcmin:F1}' of commanded motion outstanding; driving back");
+                try {
+                    await upa.MoveRelative(axis, speed, -movedArcmin, CancellationToken.None).ConfigureAwait(false);
+                } catch (Exception restoreEx) {
+                    Logger.Error($"OAPA cal {axisLabel}: failed to restore start position", restoreEx);
+                }
+                throw;
             }
+        }
 
-            // Direction consistency: forward and reversal legs must be antiparallel on the tangent plane.
-            bool consistent = TangentDotProduct(solveA, solveB, solveB, solveC) < 0;
+        // Azimuth calibration degenerates as cos(alt) -> 0; below this the lever is too foreshortened.
+        private const double MinimumAzimuthCosAltitude = 0.25;
 
-            Logger.Info($"OAPA cal {axisLabel}: forward={forwardArcmin:F2}', reversal={reversalArcmin:F2}', reverse={reverseArcmin:F2}', ratio={observedRatio:F2}, backlash={backlash:F2}', consistent={consistent}");
-            return (observedRatio, backlash, consistent);
+        /// <summary>
+        /// Converts a measured sky displacement into axis displacement. For the azimuth axis the
+        /// sky motion is foreshortened by cos(altitude) of the observed field; the altitude axis
+        /// transfers 1:1.
+        /// </summary>
+        private double AxisDisplacementArcmin(Axis axis, PlateSolveResult from, PlateSolveResult to) {
+            var skyArcmin = AngularSeparationDegrees(from, to) * 60.0;
+            if (axis != Axis.XAxis) { return skyArcmin; }
+
+            var meanAlt = (FieldAltitudeDegrees(from) + FieldAltitudeDegrees(to)) / 2.0;
+            var cosAlt = Math.Cos(meanAlt * Math.PI / 180.0);
+            if (cosAlt < MinimumAzimuthCosAltitude) {
+                throw new InvalidOperationException(
+                    $"Field altitude {meanAlt:F0}\u00b0 is too close to the zenith for azimuth calibration. " +
+                    "Point the scope at a lower altitude (ideally toward the celestial pole) and retry.");
+            }
+            return skyArcmin / cosAlt;
+        }
+
+        private double FieldAltitudeDegrees(PlateSolveResult solve) {
+            var latitude = Angle.ByDegree(profileService.ActiveProfile.AstrometrySettings.Latitude);
+            var longitude = Angle.ByDegree(profileService.ActiveProfile.AstrometrySettings.Longitude);
+            var topocentric = solve.Coordinates.Transform(latitude, longitude, solve.Coordinates.DateTime.Now);
+            return topocentric.Altitude.Degree;
         }
 
         private async Task SetStatusAsync(string status) {

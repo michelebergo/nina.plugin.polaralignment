@@ -583,6 +583,14 @@ namespace NINA.Plugins.PolarAlignment.Instructions {
                     const int RequiredConsecutiveBelowTolerance = 2;
                     var consecutiveBelowTolerance = 0;
 
+                    // Runaway guard: if automated corrections make the error worse this many
+                    // times in a row, the actuator model or calibration is wrong (wrong sign,
+                    // bad backlash, slipping mechanics). Stop moving instead of chasing it.
+                    const int MaxConsecutiveWorsenings = 3;
+                    var consecutiveWorsenings = 0;
+                    double? previousTotalErrorMinutes = null;
+                    var automatedAdjustmentsHalted = false;
+
                     var sw = Stopwatch.StartNew();
                     do {
                         await WaitIfPaused(localCTS.Token, progress);
@@ -634,9 +642,27 @@ namespace NINA.Plugins.PolarAlignment.Instructions {
                                     sw.Reset();
                                 }
                                 localCTS.Token.ThrowIfCancellationRequested();
+
+                                // Runaway detection: compare against the previous stable measurement.
+                                if (previousTotalErrorMinutes.HasValue && totalErrorMinutes > previousTotalErrorMinutes.Value + 0.05) {
+                                    consecutiveWorsenings++;
+                                } else {
+                                    consecutiveWorsenings = 0;
+                                }
+                                previousTotalErrorMinutes = totalErrorMinutes;
+
+                                if (!automatedAdjustmentsHalted && consecutiveWorsenings >= MaxConsecutiveWorsenings) {
+                                    automatedAdjustmentsHalted = true;
+                                    Logger.Error($"Automated adjustments halted: total error increased for {consecutiveWorsenings} consecutive measurements (now {Math.Round(totalErrorMinutes, 2)}'). Calibration factors or backlash compensation are likely wrong.");
+                                    Notification.ShowError(
+                                        $"Automated adjustments halted: the error has been increasing for {consecutiveWorsenings} consecutive measurements.{Environment.NewLine}" +
+                                        $"Re-run the OAPA Self-Calibration (pointing toward the celestial pole) and restart the alignment.{Environment.NewLine}" +
+                                        "The error display remains active for manual adjustment.");
+                                }
+
                                 // While a below-tolerance result awaits confirmation, hold the motors
                                 // still so the confirmation solve measures the same state.
-                                if (consecutiveBelowTolerance == 0) {
+                                if (consecutiveBelowTolerance == 0 && !automatedAdjustmentsHalted) {
                                     await TPAPAVM.MoveCloser(progress, localCTS.Token);
                                 }
                             } else {
