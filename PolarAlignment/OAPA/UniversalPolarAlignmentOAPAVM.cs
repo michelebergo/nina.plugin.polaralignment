@@ -53,8 +53,14 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
                     var dispatcher = Application.Current?.Dispatcher;
                     if (dispatcher == null || dispatcher.CheckAccess()) {
                         CalibrateGearRatiosCommand.NotifyCanExecuteChanged();
+                        SetHomeCommand.NotifyCanExecuteChanged();
+                        GoHomeCommand.NotifyCanExecuteChanged();
                     } else {
-                        dispatcher.BeginInvoke(new Action(() => CalibrateGearRatiosCommand.NotifyCanExecuteChanged()));
+                        dispatcher.BeginInvoke(new Action(() => {
+                            CalibrateGearRatiosCommand.NotifyCanExecuteChanged();
+                            SetHomeCommand.NotifyCanExecuteChanged();
+                            GoHomeCommand.NotifyCanExecuteChanged();
+                        }));
                     }
                 }
             };
@@ -205,6 +211,56 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
                 if (upa?.Connected == true && upa is UniversalPolarAlignmentOAPA oapa) {
                     oapa.SetYHoldPercent(value);
                 }
+            }
+        }
+
+        // ----- Home position (plugin-side, firmware-agnostic) -----
+        // Stored in plugin settings rather than firmware so it works with any OAPA-compatible
+        // controller. Positions are in the same axis units shown in the control panel; note the
+        // controller's counter restarts at 0 on power-up, so the stored home is valid for the
+        // current power session (or as long as the platform is not moved while unpowered).
+
+        public float HomeX {
+            get => Properties.Settings.Default.OAPAHomeX;
+            set {
+                Properties.Settings.Default.OAPAHomeX = value;
+                CoreUtil.SaveSettings(Properties.Settings.Default);
+                RaisePropertyChanged();
+            }
+        }
+
+        public float HomeY {
+            get => Properties.Settings.Default.OAPAHomeY;
+            set {
+                Properties.Settings.Default.OAPAHomeY = value;
+                CoreUtil.SaveSettings(Properties.Settings.Default);
+                RaisePropertyChanged();
+            }
+        }
+
+        public bool CanUseHome() => Connected && IsNotMoving;
+
+        [RelayCommand(CanExecute = nameof(CanUseHome))]
+        public void SetHome() {
+            HomeX = PositionX;
+            HomeY = PositionY;
+            Logger.Info($"OAPA home position set to X={HomeX:F2}, Y={HomeY:F2}");
+            Notification.ShowInformation($"Home position saved (X={HomeX:F2}, Y={HomeY:F2})");
+        }
+
+        [RelayCommand(CanExecute = nameof(CanUseHome))]
+        public async Task GoHome(CancellationToken token) {
+            try {
+                await Application.Current.Dispatcher.BeginInvoke(() => IsNotMoving = false);
+                Logger.Info($"OAPA moving to home position X={HomeX:F2}, Y={HomeY:F2}");
+                await upa.MoveAbsolute(Axis.XAxis, XSpeed, HomeX, token).ConfigureAwait(false);
+                await upa.MoveAbsolute(Axis.YAxis, YSpeed, HomeY, token).ConfigureAwait(false);
+            } catch (OperationCanceledException) {
+            } catch (Exception ex) {
+                Logger.Error(ex);
+                Notification.ShowError($"Failed to move to home position: {ex.Message}");
+            } finally {
+                await Application.Current.Dispatcher.BeginInvoke(() => IsNotMoving = true);
             }
         }
 

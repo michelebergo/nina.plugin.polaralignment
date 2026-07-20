@@ -550,5 +550,29 @@ namespace NINA.Plugins.PolarAlignment.Properties {
                 this["OAPALastPort"] = value;
             }
         }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("0")]
+        public float OAPAHomeX {
+            get {
+                return ((float)(this["OAPAHomeX"]));
+            }
+            set {
+                this["OAPAHomeX"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("0")]
+        public float OAPAHomeY {
+            get {
+                return ((float)(this["OAPAHomeY"]));
+            }
+            set {
+                this["OAPAHomeY"] = value;
+            }
+        }
     }
 }
