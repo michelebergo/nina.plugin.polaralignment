@@ -258,6 +258,19 @@ namespace NINA.Plugins.PolarAlignment {
             }
         }
 
+        public double MaxAutomatedCorrectionMagnitude {
+            get {
+                return Properties.Settings.Default.MaxAutomatedCorrectionMagnitude;
+            }
+            set {
+                if (value < AutomatedAdjustmentController.MinimumConfigurableMoveMagnitude) { value = AutomatedAdjustmentController.MinimumConfigurableMoveMagnitude; }
+                if (value > AutomatedAdjustmentController.MaximumConfigurableMoveMagnitude) { value = AutomatedAdjustmentController.MaximumConfigurableMoveMagnitude; }
+                Properties.Settings.Default.MaxAutomatedCorrectionMagnitude = value;
+                CoreUtil.SaveSettings(Properties.Settings.Default);
+                RaisePropertyChanged();
+            }
+        }
+
         public bool LogError {
             get {
                 return Properties.Settings.Default.LogError;

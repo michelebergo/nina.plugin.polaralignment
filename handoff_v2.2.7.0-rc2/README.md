@@ -37,6 +37,10 @@ Your X legs disagreed by 54% (forward 18.44' vs reverse 11.96') — a sign the m
 
 Even with good calibration, if automated corrections make the total error worse for **3 consecutive measurements**, rc2 halts the motors with an error notification instead of chasing the error away from the pole. The error display stays live for manual adjustment.
 
+### 2.5 New: Home Position panel
+
+A new panel in the OAPA dock (visible when connected): **Set Home** stores the current axis positions, **Go Home** drives both axes back with one click — handy to re-center the platform before tearing down or to start the next session with maximum travel both ways. The stored home is kept in the plugin settings, so it works with any OAPA controller; note the position counter restarts at 0 when the controller is power-cycled.
+
 ---
 
 ## 3. Re-test plan (focused, ~20 min of sky time)

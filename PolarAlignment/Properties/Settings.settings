@@ -140,5 +140,8 @@
     <Setting Name="OAPAHomeY" Type="System.Single" Scope="User">
       <Value Profile="(Default)">0</Value>
     </Setting>
+    <Setting Name="MaxAutomatedCorrectionMagnitude" Type="System.Double" Scope="User">
+      <Value Profile="(Default)">5</Value>
+    </Setting>
   </Settings>
 </SettingsFile>

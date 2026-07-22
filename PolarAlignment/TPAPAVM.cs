@@ -298,6 +298,9 @@ namespace NINA.Plugins.PolarAlignment {
                 return;
             }
 
+            // Per-cycle move cap is user-configurable (large initial errors converge in fewer cycles).
+            automatedAdjustmentController.MaximumMoveMagnitude = Properties.Settings.Default.MaxAutomatedCorrectionMagnitude;
+
             var plan = automatedAdjustmentController.CreatePlan();
             if (!plan.HasMovement) {
                 progress?.Report(new ApplicationStatus() { Status = plan.Reason });

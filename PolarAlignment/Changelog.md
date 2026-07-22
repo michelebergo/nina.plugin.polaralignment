@@ -2,6 +2,10 @@
 
 ## Version 2.2.7.0
 Focus: **OAPA sub-arcminute convergence** (rebased on top of 2.2.6.3).
+- Automated adjustments: **faster convergence on large initial errors** (beta-tester report: corrections crawled when the error was several degrees).
+  - New **"Max correction per cycle"** setting (1-30 arcmin, default 5) next to the settle time in the Options page: raises the per-cycle cap of the correction controller so multi-degree errors converge in a handful of cycles instead of dozens.
+  - **Identification probes now scale with the measured error** (15% of the error, clamped between 1 and half the cap): with the mount far off, small probes drowned in solve noise; near the pole they remain gentle.
+  - The controller now also evaluates a more aggressive correction candidate (75% of the model solution) and picks it when the learned model predicts an improvement.
 - OAPA: new **Home Position** panel in the control dock. "Set Home" stores the current axis positions in the plugin settings (firmware-agnostic, works with any OAPA-compatible controller); "Go Home" drives both axes back with one click — useful to re-center the platform before tearing down or to start the next session with maximum travel in both directions. Note: the controller's position counter restarts at 0 on power-up, so the stored home is valid for the current power session.
 - OAPA calibration: **azimuth displacements are now corrected for cos(field altitude)**. A base rotation of θ in azimuth moves a field at altitude h by only θ·cos(h); without the correction the discovered factor and backlash depended on where the scope happened to point (field-tested: same hardware yielded X factor 52 at alt ~79° vs 16 near the pole). Calibration now refuses to run the azimuth axis when the field is too close to the zenith (cos(alt) < 0.25) and tells the user to point toward the celestial pole.
 - OAPA calibration: **baseline solve before any motion** — an unsolvable field now aborts the calibration at zero cost instead of leaving the axis displaced by the priming move. On any mid-sequence failure the accumulated commanded motion is driven back before the error surfaces.
