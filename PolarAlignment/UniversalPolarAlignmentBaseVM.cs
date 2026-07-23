@@ -100,7 +100,7 @@ namespace NINA.Plugins.PolarAlignment {
                 var lastDirection = upa.XLastDirection;
                 await upa.MoveRelative(Axis.XAxis, XSpeed, position, token).ConfigureAwait(false);
                 var currentDirection = upa.XLastDirection;
-                await ClearBacklash(Axis.XAxis, XSpeed, XBacklashCompensation, lastDirection, currentDirection, token);
+                await ClearBacklash(Axis.XAxis, XSpeed, XBacklashCompensation, position, lastDirection, currentDirection, token);
                 return true;
             } catch (Exception ex) {
                 Logger.Error(ex);
@@ -127,7 +127,7 @@ namespace NINA.Plugins.PolarAlignment {
                 var lastDirection = upa.YLastDirection;
                 await upa.MoveRelative(Axis.YAxis, YSpeed, position, token).ConfigureAwait(false);
                 var currentDirection = upa.YLastDirection;
-                await ClearBacklash(Axis.YAxis, YSpeed, YBacklashCompensation, lastDirection, currentDirection, token);
+                await ClearBacklash(Axis.YAxis, YSpeed, YBacklashCompensation, position, lastDirection, currentDirection, token);
                 return true;
             } catch (Exception ex) {
                 Logger.Error(ex);
@@ -157,7 +157,9 @@ namespace NINA.Plugins.PolarAlignment {
 
                 await upa.MoveAbsolute(Axis.XAxis, XSpeed, target, token).ConfigureAwait(false);
                 var currentDirection = upa.XLastDirection;
-                await ClearBacklash(Axis.XAxis, XSpeed, XBacklashCompensation, lastDirection, currentDirection, token);
+                // Manual absolute moves always clear on reversal; the fine-approach guard is
+                // only meant for small automated nudges.
+                await ClearBacklash(Axis.XAxis, XSpeed, XBacklashCompensation, float.MaxValue, lastDirection, currentDirection, token);
             } catch (Exception ex) {
                 Logger.Error(ex);
                 if (ex is TimeoutException) {
@@ -168,9 +170,18 @@ namespace NINA.Plugins.PolarAlignment {
             }
         }
 
-        private async Task ClearBacklash(Axis axis, int speed, float compensation, LastDirection lastDirection, LastDirection currentDirection, CancellationToken token) {
+        private async Task ClearBacklash(Axis axis, int speed, float compensation, float movedMagnitude, LastDirection lastDirection, LastDirection currentDirection, CancellationToken token) {
             if (lastDirection != currentDirection) {
                 if (Math.Abs(compensation) > 0) {
+                    // Fine-approach guard: when the commanded move is smaller than the backlash
+                    // compensation itself, the out-and-back clearing excursion is far larger than
+                    // the intended motion and injects more error than it removes (field-observed
+                    // as error oscillation near the pole). Let the adaptive controller handle the
+                    // slop implicitly instead.
+                    if (Math.Abs(movedMagnitude) < Math.Abs(compensation)) {
+                        Logger.Info($"Direction changed on {axis} but commanded move ({movedMagnitude:F2}) is smaller than the backlash compensation ({compensation:F2}); skipping backlash clearing");
+                        return;
+                    }
                     Logger.Info($"Direction changed on {axis}. Clearing backlash");
                     var sequence = BacklashCompensationPlanner.CreateSequence(compensation, currentDirection);
                     await upa.MoveRelative(axis, speed, sequence.FirstMove, token).ConfigureAwait(false);
@@ -191,7 +202,7 @@ namespace NINA.Plugins.PolarAlignment {
                 var lastDirection = upa.YLastDirection;
                 await upa.MoveAbsolute(Axis.YAxis, YSpeed, target, token).ConfigureAwait(false);
                 var currentDirection = upa.YLastDirection;
-                await ClearBacklash(Axis.YAxis, YSpeed, YBacklashCompensation, lastDirection, currentDirection, token);
+                await ClearBacklash(Axis.YAxis, YSpeed, YBacklashCompensation, float.MaxValue, lastDirection, currentDirection, token);
             } catch (Exception ex) {
                 Logger.Error(ex);
                 if (ex is TimeoutException) {

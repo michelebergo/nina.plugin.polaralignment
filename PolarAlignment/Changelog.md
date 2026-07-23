@@ -2,6 +2,8 @@
 
 ## Version 2.2.7.0
 Focus: **OAPA sub-arcminute convergence** (rebased on top of 2.2.6.3).
+- Automated adjustments: **per-cycle correction limit now auto-scales with the measured error** (80% of the current total error, floor 5, ceiling from the "Max correction per cycle" setting, default 30). Multi-degree initial errors converge in a handful of cycles with zero configuration; the final approach stays gentle; the setting is now a pure safety ceiling (beta-tester request: no more restarting the procedure because a fixed limit was too small for the initial error).
+- Automated adjustments: **backlash clearing is skipped when the commanded nudge is smaller than the backlash compensation** — field logs showed the out-and-back clearing excursion (±compensation) injecting error oscillations during the fine approach when the compensation is large (5'+) and the nudges are sub-arcminute. Manual absolute moves still always clear on reversal.
 - Automated adjustments: **faster convergence on large initial errors** (beta-tester report: corrections crawled when the error was several degrees).
   - New **"Max correction per cycle"** setting (1-30 arcmin, default 5) next to the settle time in the Options page: raises the per-cycle cap of the correction controller so multi-degree errors converge in a handful of cycles instead of dozens.
   - **Identification probes now scale with the measured error** (15% of the error, clamped between 1 and half the cap): with the mount far off, small probes drowned in solve noise; near the pole they remain gentle.

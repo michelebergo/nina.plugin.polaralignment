@@ -577,7 +577,7 @@ namespace NINA.Plugins.PolarAlignment.Properties {
 
         [global::System.Configuration.UserScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("5")]
+        [global::System.Configuration.DefaultSettingValueAttribute("30")]
         public double MaxAutomatedCorrectionMagnitude {
             get {
                 return ((double)(this["MaxAutomatedCorrectionMagnitude"]));
