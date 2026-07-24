@@ -656,8 +656,11 @@ namespace NINA.Plugins.PolarAlignment.Instructions {
                                     Logger.Error($"Automated adjustments halted: total error increased for {consecutiveWorsenings} consecutive measurements (now {Math.Round(totalErrorMinutes, 2)}'). Calibration factors or backlash compensation are likely wrong.");
                                     Notification.ShowError(
                                         $"Automated adjustments halted: the error has been increasing for {consecutiveWorsenings} consecutive measurements.{Environment.NewLine}" +
-                                        $"Re-run the OAPA Self-Calibration (pointing toward the celestial pole) and restart the alignment.{Environment.NewLine}" +
-                                        "The error display remains active for manual adjustment.");
+                                        $"The alignment has been paused. Re-run the OAPA Self-Calibration (pointing toward the celestial pole) and restart the alignment,{Environment.NewLine}" +
+                                        "or resume to keep the error display active for manual adjustment.");
+                                    // Pausing makes the halt unmissable: a toast alone can be overlooked
+                                    // while the capture/solve loop keeps running as if nothing happened.
+                                    Pause();
                                 }
 
                                 // While a below-tolerance result awaits confirmation, hold the motors
