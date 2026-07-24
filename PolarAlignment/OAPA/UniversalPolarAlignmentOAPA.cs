@@ -26,6 +26,10 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
             }
         }
 
+        // The firmware reports its version in the status frame (V: field) starting with 1.1.0.
+        protected override string MinimumFirmwareVersion => "1.1.0";
+        protected override string FirmwareReferenceUrl => "https://github.com/michelebergo/oapa-firmware";
+
         private float xGearRatio = Properties.Settings.Default.OAPAXGearRatio;
         private float yGearRatio = Properties.Settings.Default.OAPAYGearRatio;
 
@@ -92,7 +96,7 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
             }
         }
 
-        [GeneratedRegex(@"<(?<status>\w+)\|MPos:(?<x>[+-]?\d+(\.\d+)?),(?<y>[+-]?\d+(\.\d+)?),(?<z>[+-]?\d+(\.\d+)?)(?:\|T:(?<target>[+-]?\d+),R:(?<running>[01]),E:(?<endstop>[01]),S:(?<speed>[+-]?\d+(\.\d+)?))?\|>")]
+        [GeneratedRegex(@"<(?<status>\w+)\|MPos:(?<x>[+-]?\d+(\.\d+)?),(?<y>[+-]?\d+(\.\d+)?),(?<z>[+-]?\d+(\.\d+)?)(?:\|T:(?<target>[+-]?\d+),R:(?<running>[01]),E:(?<endstop>[01]),S:(?<speed>[+-]?\d+(\.\d+)?))?(?:\|V:(?<version>\d+(?:\.\d+){0,2}))?\|>")]
         private static partial Regex StatusRegex();
     }
 }

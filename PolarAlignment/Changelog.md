@@ -1,6 +1,8 @@
 # Changelog
 
 ## Version 2.2.7.0
+- OAPA firmware now declares its version in the status frame; the plugin logs it and warns when the connected firmware is older than the recommended version
+- Added official references to the OAPA reference firmware (OAPA control panel link, options tooltip, FAQ)
 - When the runaway guard halts automated adjustments, the alignment now also pauses automatically so the halt cannot be missed; resume to keep monitoring the error for manual adjustment
 Focus: **OAPA sub-arcminute convergence** (rebased on top of 2.2.6.3).
 - Automated adjustments: **per-cycle correction limit now auto-scales with the measured error** (80% of the current total error, floor 5, ceiling from the "Max correction per cycle" setting, default 30). Multi-degree initial errors converge in a handful of cycles with zero configuration; the final approach stays gentle; the setting is now a pure safety ceiling (beta-tester request: no more restarting the procedure because a fixed limit was too small for the initial error).

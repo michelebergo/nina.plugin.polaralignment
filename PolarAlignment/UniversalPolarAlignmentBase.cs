@@ -1,4 +1,5 @@
 using NINA.Core.Utility;
+using NINA.Core.Utility.Notification;
 using System;
 using System.Globalization;
 using System.IO.Ports;
@@ -29,6 +30,13 @@ namespace NINA.Plugins.PolarAlignment {
         // Hook invoked after a successful match so derived systems can persist the matched
         // port name (e.g. into user settings) for the next connect.
         protected virtual void OnPortMatched(string portName) { }
+
+        // Minimum firmware version this plugin build expects the device to report in its
+        // status frame. Null disables the check for systems whose protocol has no version
+        // field (e.g. Avalon UPAS).
+        protected virtual string MinimumFirmwareVersion => null;
+        // Where users can obtain the reference firmware; included in outdated-firmware warnings.
+        protected virtual string FirmwareReferenceUrl => null;
 
         protected abstract Regex GetStatusRegex();
 
@@ -112,6 +120,7 @@ namespace NINA.Plugins.PolarAlignment {
 
         public bool Connected => port.IsOpen;
         public string Status { get; private set; }
+        public string FirmwareVersion { get; private set; }
 
         private float XPosition { get; set; }
         private float YPosition { get; set; }
@@ -306,9 +315,42 @@ namespace NINA.Plugins.PolarAlignment {
                 XPosition = float.Parse(match.Groups["x"].Value, CultureInfo.InvariantCulture);
                 YPosition = float.Parse(match.Groups["y"].Value, CultureInfo.InvariantCulture);
                 ZPosition = float.Parse(match.Groups["z"].Value, CultureInfo.InvariantCulture);
+                var versionGroup = match.Groups["version"];
+                FirmwareVersion = versionGroup.Success ? versionGroup.Value : null;
+                CheckFirmwareVersion();
             } else {
                 Logger.Error($"Failed to parse {SystemName} status: {status}");
             }
+        }
+
+        private bool firmwareVersionChecked;
+
+        private void CheckFirmwareVersion() {
+            if (firmwareVersionChecked || MinimumFirmwareVersion == null) {
+                return;
+            }
+            firmwareVersionChecked = true;
+
+            var referenceHint = FirmwareReferenceUrl == null ? string.Empty : $" The reference firmware is available at {FirmwareReferenceUrl}";
+            if (!Version.TryParse(NormalizeVersion(FirmwareVersion), out var reported)) {
+                Logger.Warning($"{SystemName} firmware does not report a version; version {MinimumFirmwareVersion} or newer is recommended.{referenceHint}");
+                Notification.ShowWarning($"{SystemName}: the connected firmware does not report a version. Updating to firmware {MinimumFirmwareVersion} or newer is recommended.");
+                return;
+            }
+            if (Version.TryParse(NormalizeVersion(MinimumFirmwareVersion), out var minimum) && reported < minimum) {
+                Logger.Warning($"{SystemName} firmware {FirmwareVersion} is older than the recommended {MinimumFirmwareVersion}.{referenceHint}");
+                Notification.ShowWarning($"{SystemName}: firmware {FirmwareVersion} is older than the recommended {MinimumFirmwareVersion}. Consider updating.");
+                return;
+            }
+            Logger.Info($"{SystemName} firmware version: {FirmwareVersion}");
+        }
+
+        // Version.TryParse needs at least "major.minor"; firmware may report a bare major.
+        private static string NormalizeVersion(string version) {
+            if (string.IsNullOrWhiteSpace(version)) {
+                return null;
+            }
+            return version.Contains('.') ? version : version + ".0";
         }
 
         private static string ReadStatusLine(SerialPort serialPort) {

@@ -37,7 +37,7 @@
     <s:String x:Key="UseContinuousErrorEstimatorToolTip">When enabled, TPPA uses the experimental time-aware continuous estimator for live correction error. When disabled, TPPA uses the legacy image-plane calculation.</s:String>
     <s:String x:Key="StopTrackingWhenDoneToolTip">When enabled, TPPA turns sidereal tracking off in its cleanup path after the run ends.</s:String>
     <s:String x:Key="AutoPauseToolTip">When enabled, TPPA pauses itself after each continuous-correction update.</s:String>
-    <s:String x:Key="PolarAlignmentSystemToolTip">Selects which hardware adjustment system TPPA exposes as the active alignment system: None, UPAS, or OAPA.</s:String>
+    <s:String x:Key="PolarAlignmentSystemToolTip">Selects which hardware adjustment system TPPA exposes as the active alignment system: None, UPAS, or OAPA. OAPA requires a controller running the reference firmware, available at github.com/michelebergo/oapa-firmware.</s:String>
     <s:String x:Key="ReverseAzimuthToolTip">Negates azimuth-axis nudge and move commands sent through the selected hardware system.</s:String>
     <s:String x:Key="ReverseAltitudeToolTip">Negates altitude-axis nudge and move commands sent through the selected hardware system.</s:String>
     <s:String x:Key="AzimuthBacklashCompensationToolTip">If non-zero and the azimuth movement direction changes, TPPA sends an extra negative-then-positive relative X move of this size after the main move.</s:String>
