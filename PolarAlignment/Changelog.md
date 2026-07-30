@@ -1,5 +1,8 @@
 # Changelog
 
+## Version 2.2.6.8
+- Fixed the unit label of the "Azimuth backlash compensation" option: the value is in arcminutes, but the field was labeled "steps". At least one user entered a step count (20600) accordingly, which made every direction reversal drive a huge clearing excursion.
+
 ## Version 2.2.6.5
 - Automatic completion now requires 2 consecutive solves below the alignment tolerance before finishing, so a single lucky solve cannot end a non-converged procedure. While a below-tolerance result awaits confirmation, automated corrections hold still so the confirmation solve measures the same state.
 
