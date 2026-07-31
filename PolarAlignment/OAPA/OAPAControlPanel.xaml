@@ -18,6 +18,18 @@
     </UserControl.Resources>
 
     <StackPanel>
+        <!-- The guidance every new user otherwise gets by asking: collapsed by default. -->
+        <Expander Header="First movement checklist" Margin="0,0,0,5">
+            <StackPanel Margin="20,5,5,5">
+                <TextBlock TextWrapping="Wrap" Margin="0,2" Text="1. Connect the controller and check the position readout updates." />
+                <TextBlock TextWrapping="Wrap" Margin="0,2" Text="2. Review speed, run current and hold percent for both axes (defaults suit the reference hardware)." />
+                <TextBlock TextWrapping="Wrap" Margin="0,2" Text="3. With automated adjustments OFF, make a small test nudge (±1') on each axis and confirm the platform physically moves." />
+                <TextBlock TextWrapping="Wrap" Margin="0,2" Text="4. Watch a star or the live view: if an axis moves the wrong way, toggle its Reverse flag in the plugin options (Self-Calibration can also fix this automatically)." />
+                <TextBlock TextWrapping="Wrap" Margin="0,2" Text="5. Run Self-Calibration on a plate-solvable field away from the zenith: it measures the calibration factors, the backlash, and recommends a backlash mode." />
+                <TextBlock TextWrapping="Wrap" Margin="0,2" Text="6. Apply the result, enable 'Adjust for refraction' in the options (recommended), then start the polar alignment with automated adjustments ON." />
+            </StackPanel>
+        </Expander>
+
         <!-- Motor Settings -->
         <Grid>
             <Grid.ColumnDefinitions>
@@ -127,7 +139,25 @@
             </GroupBox>
         </Grid>
 
-        <!-- Manual Control Panel - Only Visible When Connected And Manual -->
+        <!-- Hidden only while disconnected; with automated adjustments active the controls
+             stay visible but disabled, so users discover they exist. -->
+        <TextBlock Margin="0,5,0,0" Opacity="0.7" TextWrapping="Wrap"
+                   Text="Manual controls are disabled while automated adjustments are active - turn them off to nudge manually.">
+            <TextBlock.Style>
+                <Style TargetType="TextBlock">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                    <Style.Triggers>
+                        <MultiDataTrigger>
+                            <MultiDataTrigger.Conditions>
+                                <Condition Binding="{Binding Connected}" Value="True" />
+                                <Condition Binding="{Binding DoAutomatedAdjustments}" Value="True" />
+                            </MultiDataTrigger.Conditions>
+                            <Setter Property="Visibility" Value="Visible" />
+                        </MultiDataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </TextBlock.Style>
+        </TextBlock>
         <Grid Margin="0,5,0,0">
             <Grid.Style>
                 <Style TargetType="Grid">
@@ -137,7 +167,7 @@
                             <Setter Property="Visibility" Value="Collapsed" />
                         </DataTrigger>
                         <DataTrigger Binding="{Binding DoAutomatedAdjustments}" Value="True">
-                            <Setter Property="Visibility" Value="Collapsed" />
+                            <Setter Property="IsEnabled" Value="False" />
                         </DataTrigger>
                     </Style.Triggers>
                 </Style>
