@@ -41,11 +41,12 @@ InitialProbeArcmin=5, EngageEscalationFactor=3, MaxEngageAttempts=4, DetectionFl
 
 ## Tasks
 
-- [ ] Task 1: FakeAxis extensions (noise seeded deterministic, per-reversal backlash variation for slippage, direction-dependent responseScale for asymmetry) + gilas regression test written and RED against current service.
-- [ ] Task 2: staged sequence in OapaCalibrationService (S0-S5), Result fields; adapt existing service tests (declare changes); suite green incl. gilas.
-- [ ] Task 3: S6 closing refactor + budget guard + excursion caps; restore tests green.
-- [ ] Task 4: VM Apply-block on slippage + slippage/asymmetry messages + tests.
-- [ ] Task 5: full suite, commit per task, push branch. Version bump/changelog deferred to PR opening.
+- [x] Task 1: RobustFakeAxis (seeded noise, per-reversal backlash sequence, direction-dependent scale) + 11 tests; 4 behavioral RED verified on the fixed-leg service (gilas backlash, asymmetry report, slippage, noise).
+- [x] Task 2: staged sequence S0-S5 in OapaCalibrationService; ComputeAxisCalibration + fixed-leg geometry helpers removed with tests (invariants moved to sequence-level); Result fields added.
+- [x] Task 3: S6 iterative closing + iterative BestEffortRestore + solve budget (20) + leg cap (90' physical). All preexisting service tests green unchanged.
+- [x] Task 4: VM Apply gate on slippage (CanApplyCalibration), slippage/asymmetry messages with values, internal solver boundary for tests; 3 production-path VM tests via FakeRig.
+- [x] Task 5: 94/94, commits 76f29c4 + 181760c, branch pushed. Version bump/changelog deferred to PR opening (after #16/#17 merge).
 
 Status notes (update as you go):
-- 2026-07-30: plan written, branch created. Nothing implemented yet.
+- 2026-07-30: plan written, branch created.
+- 2026-07-31: A complete on feat/oapa-robust-calibration (76f29c4 staged sequence, 181760c VM gate). 94/94. Next rc9 item: B (backlash modes UI + auto-recommendation) on top of this + #17's TryFineNudge; then C provenance.
