@@ -36,6 +36,7 @@
     <s:String x:Key="RefractionAdjustmentToolTip">Controls whether TPPA computes the polar error with refraction-aware topocentric coordinates.</s:String>
     <s:String x:Key="UseContinuousErrorEstimatorToolTip">When enabled, TPPA uses the experimental time-aware continuous estimator for live correction error. When disabled, TPPA uses the legacy image-plane calculation.</s:String>
     <s:String x:Key="PrecisionFinishModeToolTip">Near completion (below 2' of total error) the displayed error and the automatic-finish decision use a rolling average of the last 4 solves instead of a single noisy one, making sub-0.5' finishes reliable. The average restarts after every automated move. The correction controller always sees the raw measurements.</s:String>
+    <s:String x:Key="AutoVerificationRunToolTip">After a successful alignment that started from a large error (&gt;2°), or after a pause caused by estimate drift, automatically re-run the full measurement and correction once. Runs at most one extra cycle per instruction execution. Recommended ON for unattended sequences.</s:String>
     <s:String x:Key="StopTrackingWhenDoneToolTip">When enabled, TPPA turns sidereal tracking off in its cleanup path after the run ends.</s:String>
     <s:String x:Key="AutoPauseToolTip">When enabled, TPPA pauses itself after each continuous-correction update.</s:String>
     <s:String x:Key="PolarAlignmentSystemToolTip">Selects which hardware adjustment system TPPA exposes as the active alignment system: None, UPAS, or OAPA.</s:String>
@@ -68,6 +69,7 @@
                             <ColumnDefinition />
                         </Grid.ColumnDefinitions>
                         <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
@@ -564,8 +566,23 @@
                                 Text="Averages the last solves near completion for reliable sub-0.5' finishes"
                                 Visibility="{Binding PrecisionFinishMode, Converter={StaticResource BooleanToVisibilityConverter}}" />
                         </StackPanel>
-                        <Button
+                        <TextBlock
                             Grid.Row="27"
+                            Margin="0,5,0,0"
+                            VerticalAlignment="Center"
+                            Text="Auto verification run"
+                            ToolTip="{StaticResource AutoVerificationRunToolTip}" />
+                        <CheckBox
+                            Grid.Row="27"
+                            Grid.Column="1"
+                            MinWidth="80"
+                            Margin="5,5,0,0"
+                            HorizontalAlignment="Left"
+                            VerticalAlignment="Center"
+                            IsChecked="{Binding AutoVerificationRun}"
+                            ToolTip="{StaticResource AutoVerificationRunToolTip}" />
+                        <Button
+                            Grid.Row="28"
                             Margin="0,20,0,0"
                             Command="{Binding ResetSettingsCommand}"
                             ToolTip="{StaticResource ResetSettingsToolTip}">

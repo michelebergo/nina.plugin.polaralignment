@@ -86,6 +86,7 @@ namespace NINA.Plugins.PolarAlignment {
         internal readonly AutomatedAdjustmentController automatedAdjustmentController = new AutomatedAdjustmentController();
         private bool lastContinuousEstimateStable = true;
         private bool runawayNotified;
+        private bool refractionHintShown;
 
         /// <summary>
         /// True when the automated controller detected a runaway (consecutive corrective
@@ -93,10 +94,35 @@ namespace NINA.Plugins.PolarAlignment {
         /// </summary>
         public bool AutomatedAdjustmentsHalted => automatedAdjustmentController.RunawayDetected;
 
+        // The convergence monitor must never act on a manual alignment (upstream review
+        // principle, PR #13 comment 1).
+        public bool AutomatedAdjustmentsActive => ActiveAlignmentSystemVM != null && ActiveAlignmentSystemVM.DoAutomatedAdjustments;
+
+        // Facts about the most recent correction cycle, consumed by the fine-phase
+        // convergence monitor to classify runaway streaks and detect stationary drift.
+        public double LastCommandedMoveMagnitude { get; private set; }
+        public bool LastCycleMoved { get; private set; }
+
+        public void ResetCycleFacts() {
+            LastCommandedMoveMagnitude = 0;
+            LastCycleMoved = false;
+        }
+
         public void ActivateFirstStep() {
             automatedAdjustmentController.Reset();
             lastContinuousEstimateStable = true;
             runawayNotified = false;
+
+            // Reset all step indicators back to their construction-time state before
+            // (re-)activating the first one. Without this, a second pass through the
+            // sequence (e.g. an auto verification run) leaves the previous cycle's
+            // Completed/Active/Relevant flags stale on every step.
+            foreach (var step in Steps) {
+                step.Completed = false;
+                step.Active = false;
+                step.Relevant = false;
+            }
+
             Steps[0].Active = true;
             Steps[0].Relevant = true;
         }
@@ -210,6 +236,10 @@ namespace NINA.Plugins.PolarAlignment {
         public async Task<bool> UpdateDetails(PlateSolveResult psr, IProgress<ApplicationStatus> progress, CancellationToken token) {
             PolarErrorDetermination.CurrentReferenceFrame = psr;
             var refractionParams = RefractionParameters.GetRefractionParameters(weatherDataMediator.GetInfo());
+            if (!refractionHintShown && weatherDataMediator.GetInfo()?.Connected != true) {
+                refractionHintShown = true;
+                Logger.Info("No weather source connected: refraction is modeled with standard-atmosphere defaults. Connecting a weather device improves the error estimate, especially near the pole.");
+            }
             PolarErrorDetermination.UpdateCurrentCorrectionFieldWarnings(refractionParams);
             var useContinuousErrorEstimator = UseContinuousErrorEstimator;
             var estimateStable = true;
@@ -348,6 +378,9 @@ namespace NINA.Plugins.PolarAlignment {
                 progress?.Report(new ApplicationStatus() { Status = plan.Reason });
                 return;
             }
+
+            LastCommandedMoveMagnitude = Math.Max(Math.Abs(plan.XMagnitude), Math.Abs(plan.YMagnitude));
+            LastCycleMoved = true;
 
             progress?.Report(new ApplicationStatus() {
                 Status = $"{plan.Reason}: X {Math.Round(plan.XMagnitude, 2)}, Y {Math.Round(plan.YMagnitude, 2)}"

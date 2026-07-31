@@ -18,6 +18,12 @@
     </UserControl.Resources>
 
     <StackPanel>
+        <!-- Firmware reference -->
+        <TextBlock Margin="5,5,5,0">
+            <Run Text="Requires an OAPA-compatible controller running the reference firmware: " />
+            <Hyperlink NavigateUri="https://github.com/michelebergo/oapa-firmware" RequestNavigate="Hyperlink_RequestNavigate">github.com/michelebergo/oapa-firmware</Hyperlink>
+        </TextBlock>
+
         <!-- The guidance every new user otherwise gets by asking: collapsed by default. -->
         <Expander Header="First movement checklist" Margin="0,0,0,5">
             <StackPanel Margin="20,5,5,5">

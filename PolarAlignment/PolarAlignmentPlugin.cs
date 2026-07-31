@@ -155,6 +155,17 @@ namespace NINA.Plugins.PolarAlignment {
             }
         }
 
+        public bool AutoVerificationRun {
+            get {
+                return Properties.Settings.Default.AutoVerificationRun;
+            }
+            set {
+                Properties.Settings.Default.AutoVerificationRun = value;
+                CoreUtil.SaveSettings(Properties.Settings.Default);
+                RaisePropertyChanged();
+            }
+        }
+
         public double DefaultMoveRate {
             get {
                 return Properties.Settings.Default.DefaultMoveRate;

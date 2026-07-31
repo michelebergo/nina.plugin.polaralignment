@@ -400,257 +400,359 @@ namespace NINA.Plugins.PolarAlignment.Instructions {
         /// <returns></returns>
         public override async Task Execute(IProgress<ApplicationStatus> externalProgress, CancellationToken token) {
             try {
-                using (var localCTS = CancellationTokenSource.CreateLinkedTokenSource(token)) {
-                    Guid correlatedGuid = Guid.NewGuid();
-                    pauseTS = new PauseTokenSource();
+                CancellationTokenSource localCTS = null;
+                // Window close must veto the auto verification run: its cancellation is otherwise indistinguishable from a graceful finish at the exception filter.
+                var alignmentWindowClosed = false;
+                Guid correlatedGuid = Guid.NewGuid();
+                pauseTS = new PauseTokenSource();
+                try {
+                    TPAPAVM?.Dispose();
+                } catch { }
+
+                TPAPAVM = new TPAPAVM(profileService, weatherDataMediator);
+                IProgress<ApplicationStatus> progress = new Progress<ApplicationStatus>(p => {
+                    TPAPAVM.Status = p;
+                    externalProgress?.Report(p);
+                    messageBroker?.Publish(new PolarAlignmentProgressMessage(correlatedGuid, p));
+                });
+
+                windowService.Show(TPAPAVM, Loc.Instance["LblPolarAlignment"], System.Windows.ResizeMode.CanResizeWithGrip, System.Windows.WindowStyle.SingleBorderWindow);
+                windowService.OnClosed += (s, e) => {
                     try {
-                        TPAPAVM?.Dispose();
+                        alignmentWindowClosed = true;
+                        localCTS?.Cancel();
+                    } catch { }
+                };
+
+                if (guiderMediator?.GetInfo()?.Connected == true) {
+                    Logger.Info("Stopping guiding to start polar alignment.");
+                    try {
+                        await guiderMediator.StopGuiding(token);
                     } catch { }
 
-                    TPAPAVM = new TPAPAVM(profileService, weatherDataMediator);
-                    IProgress<ApplicationStatus> progress = new Progress<ApplicationStatus>(p => {
-                        TPAPAVM.Status = p;
-                        externalProgress?.Report(p);
-                        messageBroker?.Publish(new PolarAlignmentProgressMessage(correlatedGuid, p));
-                    });
+                }
 
-                    windowService.Show(TPAPAVM, Loc.Instance["LblPolarAlignment"], System.Windows.ResizeMode.CanResizeWithGrip, System.Windows.WindowStyle.SingleBorderWindow);
-                    windowService.OnClosed += (s, e) => {
+                var currentPosition = telescopeMediator.GetInfo().Connected ? telescopeMediator.GetCurrentPosition().Transform(Latitude, Longitude) : null;
+                Logger.Info($"""
+                    Starting polar alignment:
+                        Manual mode: {ManualMode}
+                        Measure point distance: {TargetDistance}
+                        Mount move rate: {MoveRate}
+                        Timeout factor: {Properties.Settings.Default.MoveTimeoutFactor}
+                        Direction east: {EastDirection}
+                        Start from current: {StartFromCurrentPosition}
+                        Altitude: {(StartFromCurrentPosition ? currentPosition?.Altitude : Coordinates.Coordinates.Altitude)}
+                        Azimuth: {(StartFromCurrentPosition ? currentPosition?.Azimuth : Coordinates.Coordinates.Azimuth)}
+                        Alignment tolerance: {AlignmentTolerance}
+                        Filter: {Filter}
+                        Exposure time: {ExposureTime}
+                        Binning: {Binning}
+                        Gain: {Gain}
+                        Offset: {Offset}
+                        Initial search radius: {SearchRadius}
+                        Refraction adjustment: {Properties.Settings.Default.RefractionAdjustment}
+                        Continuous error estimator: {Properties.Settings.Default.UseContinuousErrorEstimator}
+                        Stop tracking when done: {Properties.Settings.Default.StopTrackingWhenDone}
+                        Auto pause: {Properties.Settings.Default.AutoPause}
+                        Avalon UPA: {Properties.Settings.Default.UseAvalonPolarAlignmentSystem}
+                        OAPA: {Properties.Settings.Default.UseOAPAPolarAlignmentSystem}
+                        Selected System: {Properties.Settings.Default.SelectedPolarAlignmentSystem}
+                        Automated adjustments: {Properties.Settings.Default.DoAutomatedAdjustments}
+                        Auto verification run: {Properties.Settings.Default.AutoVerificationRun}
+                    """);
+
+                var verificationRunDone = false;
+                var haltWasEstimateDrift = false;
+                var finishedBelowTolerance = false;
+                var automatedAdjustmentsHalted = false;
+
+                while (true) {
+                    haltWasEstimateDrift = false;
+                    finishedBelowTolerance = false;
+                    automatedAdjustmentsHalted = false;
+                    var cycleFinishedGracefully = false;
+
+                    // Known benign race: a window close in the instant between shouldVerify and this assignment cancels a disposed CTS (swallowed); the alignmentWindowClosed flag still vetoes any LATER cycle, and the gap is millisecond-scale.
+                    using (localCTS = CancellationTokenSource.CreateLinkedTokenSource(token)) {
                         try {
-                            localCTS?.Cancel();
-                        } catch { }
-                    };
+                            TPAPAVM.ActivateFirstStep();
 
-                    if (guiderMediator?.GetInfo()?.Connected == true) { 
-                        Logger.Info("Stopping guiding to start polar alignment.");
-                        try {
-                            await guiderMediator.StopGuiding(token);
-                        } catch { }
-                        
-                    }
-
-                    var currentPosition = telescopeMediator.GetInfo().Connected ? telescopeMediator.GetCurrentPosition().Transform(Latitude, Longitude) : null;
-                    Logger.Info($"""
-                        Starting polar alignment:
-                            Manual mode: {ManualMode}
-                            Measure point distance: {TargetDistance}
-                            Mount move rate: {MoveRate}
-                            Timeout factor: {Properties.Settings.Default.MoveTimeoutFactor}
-                            Direction east: {EastDirection}
-                            Start from current: {StartFromCurrentPosition}
-                            Altitude: {(StartFromCurrentPosition ? currentPosition?.Altitude : Coordinates.Coordinates.Altitude)}
-                            Azimuth: {(StartFromCurrentPosition ? currentPosition?.Azimuth : Coordinates.Coordinates.Azimuth)}
-                            Alignment tolerance: {AlignmentTolerance}
-                            Filter: {Filter}
-                            Exposure time: {ExposureTime}
-                            Binning: {Binning}
-                            Gain: {Gain}
-                            Offset: {Offset}
-                            Initial search radius: {SearchRadius}
-                            Refraction adjustment: {Properties.Settings.Default.RefractionAdjustment}
-                            Continuous error estimator: {Properties.Settings.Default.UseContinuousErrorEstimator}
-                            Stop tracking when done: {Properties.Settings.Default.StopTrackingWhenDone}
-                            Auto pause: {Properties.Settings.Default.AutoPause}
-                            Avalon UPA: {Properties.Settings.Default.UseAvalonPolarAlignmentSystem}
-                            OAPA: {Properties.Settings.Default.UseOAPAPolarAlignmentSystem}
-                            Selected System: {Properties.Settings.Default.SelectedPolarAlignmentSystem}
-                            Automated adjustments: {Properties.Settings.Default.DoAutomatedAdjustments}
-                        """);
-
-                    TPAPAVM.ActivateFirstStep();
-
-                    if (!ManualMode) {
-                        if (!StartFromCurrentPosition) {
-                            Logger.Info($"Slewing to initial position {Coordinates.Coordinates}");
-                            SetTrackingSidereal(true);
-                            await telescopeMediator.SlewToCoordinatesAsync(Coordinates.Coordinates, localCTS.Token);
-                        } else {
-                            Logger.Info($"Starting from current position {telescopeMediator.GetCurrentPosition()}");
-                        }
-
-                    } else {
-                        if (telescopeMediator.GetInfo().Connected) {
-                            Logger.Info($"Manual mode engaged with mount connection available. Running in semi manual mode with standard plate solver.");
-                            SetTrackingSidereal(true);
-                        } else {
-                            Logger.Info($"Manual mode engaged without any mount connection. Running in complete blind mode using blind solver.");
-                        }
-                    }
-
-                    if (telescopeMediator.GetInfo().Connected && domeMediator.GetInfo().Connected) {
-                        await domeMediator.WaitForDomeSynchronization(token);
-                    }
-
-                    var solve1 = await Solve(TPAPAVM, 5.0, progress, localCTS.Token);
-                    var refractionParameter = RefractionParameters.GetRefractionParameters(weatherDataMediator.GetInfo());
-
-                    var telescopeInfo = telescopeMediator.GetInfo();
-
-                    var position1 = new Position(solve1.Coordinates, solve1.PositionAngle, Latitude, Longitude, Elevation, refractionParameter);
-
-                    var point1MountInfo = telescopeMediator.GetInfo();
-                    string point1MountInfoString = "";
-                    if (point1MountInfo.Connected) {
-                        point1MountInfoString = $" - Mount RA: {point1MountInfo.RightAscensionString}; Mount Dec: {point1MountInfo.DeclinationString}";
-                    }
-                    Logger.Info($"First measurement point {solve1.Coordinates} - Vector: {position1.Vector} - Position Angle: {position1.PositionAngle}{point1MountInfoString}");
-
-                    TPAPAVM.ActivateSecondStep();
-
-                    PlateSolveResult solve2 = null;
-                    if (!ManualMode) {
-                        solve2 = await AutomatedNextPoint(progress, localCTS.Token);
-                    } else {
-                        solve2 = await ManualNextPoint(solve1, progress, localCTS.Token);
-                    }
-
-                    var position2 = new Position(solve2.Coordinates, solve2.PositionAngle, Latitude, Longitude, Elevation, refractionParameter);
-                    var point2MountInfo = telescopeMediator.GetInfo();
-                    string point2MountInfoString = "";
-                    if (point2MountInfo.Connected) {
-                        point2MountInfoString = $" - Mount RA: {point2MountInfo.RightAscensionString}; Mount Dec: {point2MountInfo.DeclinationString}";
-                    }
-                    Logger.Info($"Second measurement point {solve2.Coordinates} - Vector: {position2.Vector} - Position Angle: {position2.PositionAngle}{point2MountInfoString}");
-
-                    TPAPAVM.ActivateThirdStep();
-
-
-                    PlateSolveResult solve3 = null;
-                    if (!ManualMode) {
-                        solve3 = await AutomatedNextPoint(progress, localCTS.Token);
-                    } else {
-                        solve3 = await ManualNextPoint(solve2, progress, localCTS.Token);
-                        await CoreUtil.Wait(TimeSpan.FromSeconds(10), localCTS.Token, progress, "Waiting for things to settle. Make sure the scope is tracking and don't move any further!");
-                        solve3 = await Solve(TPAPAVM, 5.0, progress, localCTS.Token);
-                    }
-
-                    var position3 = new Position(solve3.Coordinates, solve3.PositionAngle, Latitude, Longitude, Elevation, refractionParameter);
-
-                    var point3MountInfo = telescopeMediator.GetInfo();
-                    string point3MountInfoString = "";
-                    if (point3MountInfo.Connected) {
-                        point3MountInfoString = $" - Mount RA: {point3MountInfo.RightAscensionString}; Mount Dec: {point3MountInfo.DeclinationString}";
-                    }
-                    Logger.Info($"Third measurement point {solve3.Coordinates} - Vector: {position3.Vector} - Position Angle: {position3.PositionAngle}{point3MountInfoString}");
-
-                    progress?.Report(GetStatus("Calculating Error"));
-
-                    Angle decSpread = Angle.Zero;
-                    if (point1MountInfo.Connected && point2MountInfo.Connected && point3MountInfo.Connected) {
-                        double CalculateDeclinationSpread(double value1, double value2, double value3) {
-                            double min = Math.Min(value1, Math.Min(value2, value3));
-                            double max = Math.Max(value1, Math.Max(value2, value3));
-                            return max - min;
-                        }
-                        decSpread = Angle.ByDegree(CalculateDeclinationSpread(point1MountInfo.Declination, point2MountInfo.Declination, point3MountInfo.Declination));
-                    }
-
-                    // The initial three-point solve is pure calculation, so build it off the caller context
-                    // and only publish the finished result back onto the view model afterwards.
-                    var determination = await Task.Run(() => new PolarErrorDetermination(solve3,
-                                                                                          position1,
-                                                                                          position2,
-                                                                                          position3,
-                                                                                          Latitude,
-                                                                                          Longitude,
-                                                                                          Elevation,
-                                                                                          refractionParameter,
-                                                                                          Properties.Settings.Default.RefractionAdjustment,
-                                                                                          decSpread.ArcSeconds),
-                                                       localCTS.Token);
-                    TPAPAVM.PolarErrorDetermination = determination;
-
-                    Logger.Info($"Calculated Error: Az: {TPAPAVM.PolarErrorDetermination.InitialMountAxisAzimuthError}, Alt: {TPAPAVM.PolarErrorDetermination.InitialMountAxisAltitudeError}, Tot: {TPAPAVM.PolarErrorDetermination.InitialMountAxisTotalError}");
-
-                    TPAPAVM.ActivateFourthStep();
-
-                    if (TPAPAVM.ActiveAlignmentSystemVM != null) {
-                        await TPAPAVM.ActiveAlignmentSystemVM.Connect();
-                        if (TPAPAVM.ActiveAlignmentSystemVM.DoAutomatedAdjustments && !TPAPAVM.ActiveAlignmentSystemVM.Connected) {
-                            throw new SequenceEntityFailedException("Unable to connect to Polar Alignment system. Cancelling polar alignment routine as automated adjustments are impossible.");
-                        }
-                    }
-
-                    TPAPAVM.ArcsecPerPix = AstroUtil.ArcsecPerPixel(profileService.ActiveProfile.CameraSettings.PixelSize * Binning?.X ?? 1, profileService.ActiveProfile.TelescopeSettings.FocalLength);
-                    var width = TPAPAVM.Image.Image.PixelWidth;
-                    var height = TPAPAVM.Image.Image.PixelHeight;
-                    TPAPAVM.Center = new Point(width / 2, height / 2);
-
-                    await TPAPAVM.UseImageCenterAsReference(localCTS.Token);
-
-                    // A single lucky solve must not end the procedure: require consecutive
-                    // confirmations below tolerance before auto-finishing.
-                    var autoFinishGate = new AutoFinishGate(2);
-                    // Pausing on a detected runaway makes the halt unmissable: a toast alone
-                    // can be overlooked while the capture/solve loop keeps running.
-                    var runawayPauseGate = new RunawayPauseGate();
-
-                    var sw = Stopwatch.StartNew();
-                    do {
-                        await WaitIfPaused(localCTS.Token, progress);
-
-                        var continuousSolve = await Solve(TPAPAVM, 0, progress, localCTS.Token);
-                        if (continuousSolve.Success) {
-                            var estimateStable = await TPAPAVM.UpdateDetails(continuousSolve, progress, localCTS.Token);
-
-                            if (estimateStable) {
-                                await messageBroker.Publish(
-                                    new PolarAlignmentErrorMessage(
-                                        correlatedGuid,
-                                        altitudeError: TPAPAVM.PolarErrorDetermination.CurrentMountAxisAltitudeError.Degree,
-                                        azimuthError: TPAPAVM.PolarErrorDetermination.CurrentMountAxisAzimuthError.Degree,
-                                        totalError: TPAPAVM.PolarErrorDetermination.CurrentMountAxisTotalError.Degree
-                                    )
-                                );
-
-                                Logger.Info($"Calculated Error: Az: {TPAPAVM.PolarErrorDetermination.CurrentMountAxisAzimuthError}, Alt: {TPAPAVM.PolarErrorDetermination.CurrentMountAxisAltitudeError}, Tot: {TPAPAVM.PolarErrorDetermination.CurrentMountAxisTotalError}");
-
-                                var totalErrorMinutes = Math.Abs(TPAPAVM.PolarErrorDetermination.CurrentMountAxisTotalError.ArcMinutes);
-                                if (autoFinishGate.Register(totalErrorMinutes <= AlignmentTolerance)) {
-                                    Logger.Info($"Total Error is below alignment tolerance ({AlignmentTolerance}') for {autoFinishGate.Consecutive} consecutive solves. " +
-                                        $"Altitude Error: {Math.Round(TPAPAVM.PolarErrorDetermination.CurrentMountAxisAltitudeError.ArcMinutes, 2)}'. " +
-                                        $"Azimuth Error: {Math.Round(TPAPAVM.PolarErrorDetermination.CurrentMountAxisAzimuthError.ArcMinutes, 2)}'. " +
-                                        $"Total Error: {Math.Round(totalErrorMinutes, 2)}'. " +
-                                        $"Automatically finishing polar alignment.");
-                                    Notification.ShowInformation(
-                                        $"Total Error is below alignment tolerance.{Environment.NewLine}" +
-                                        $"Tolerance: {AlignmentTolerance}{Environment.NewLine}'" +
-                                        $"Altitude Error: {Math.Round(TPAPAVM.PolarErrorDetermination.CurrentMountAxisAltitudeError.ArcMinutes, 2)}'{Environment.NewLine}" +
-                                        $"Azimuth Error: {Math.Round(TPAPAVM.PolarErrorDetermination.CurrentMountAxisAzimuthError.ArcMinutes, 2)}'{Environment.NewLine}" +
-                                        $"Total Error: {Math.Round(totalErrorMinutes, 2)}'{Environment.NewLine}" +
-                                        $"Automatically finishing polar alignment.",
-                                        TimeSpan.FromMinutes(1));
-                                    localCTS.Cancel();
-                                } else if (autoFinishGate.Consecutive > 0) {
-                                    Logger.Info($"Total Error {Math.Round(totalErrorMinutes, 2)}' is below alignment tolerance ({AlignmentTolerance}'), awaiting confirmation solve ({autoFinishGate.Consecutive}/{autoFinishGate.RequiredConsecutive}).");
+                            if (!ManualMode) {
+                                if (!StartFromCurrentPosition) {
+                                    Logger.Info($"Slewing to initial position {Coordinates.Coordinates}");
+                                    SetTrackingSidereal(true);
+                                    await telescopeMediator.SlewToCoordinatesAsync(Coordinates.Coordinates, localCTS.Token);
+                                } else {
+                                    Logger.Info($"Starting from current position {telescopeMediator.GetCurrentPosition()}");
                                 }
-                                if (sw.Elapsed > TimeSpan.FromMinutes(5)) {
-                                    Logger.Info("Correction phase exceeded 5 minutes");
-                                    Notification.ShowInformation($"Polar alignment correction phase has been running for multiple minutes.{Environment.NewLine}Consider restarting the process to improve precision");
-                                    sw.Stop();
-                                    sw.Reset();
+
+                            } else {
+                                if (telescopeMediator.GetInfo().Connected) {
+                                    Logger.Info($"Manual mode engaged with mount connection available. Running in semi manual mode with standard plate solver.");
+                                    SetTrackingSidereal(true);
+                                } else {
+                                    Logger.Info($"Manual mode engaged without any mount connection. Running in complete blind mode using blind solver.");
                                 }
-                                localCTS.Token.ThrowIfCancellationRequested();
-                                // While a below-tolerance result awaits confirmation, hold the motors
-                                // still so the confirmation solve measures the same state.
-                                if (autoFinishGate.Consecutive == 0) {
-                                    await TPAPAVM.MoveCloser(progress, localCTS.Token);
-                                    if (runawayPauseGate.ShouldPause(TPAPAVM.AutomatedAdjustmentsHalted)) {
-                                        Pause();
+                            }
+
+                            if (telescopeMediator.GetInfo().Connected && domeMediator.GetInfo().Connected) {
+                                await domeMediator.WaitForDomeSynchronization(token);
+                            }
+
+                            var solve1 = await Solve(TPAPAVM, 5.0, progress, localCTS.Token);
+                            var refractionParameter = RefractionParameters.GetRefractionParameters(weatherDataMediator.GetInfo());
+
+                            var telescopeInfo = telescopeMediator.GetInfo();
+
+                            var position1 = new Position(solve1.Coordinates, solve1.PositionAngle, Latitude, Longitude, Elevation, refractionParameter);
+
+                            var point1MountInfo = telescopeMediator.GetInfo();
+                            string point1MountInfoString = "";
+                            if (point1MountInfo.Connected) {
+                                point1MountInfoString = $" - Mount RA: {point1MountInfo.RightAscensionString}; Mount Dec: {point1MountInfo.DeclinationString}";
+                            }
+                            Logger.Info($"First measurement point {solve1.Coordinates} - Vector: {position1.Vector} - Position Angle: {position1.PositionAngle}{point1MountInfoString}");
+
+                            TPAPAVM.ActivateSecondStep();
+
+                            PlateSolveResult solve2 = null;
+                            if (!ManualMode) {
+                                solve2 = await AutomatedNextPoint(progress, localCTS.Token);
+                            } else {
+                                solve2 = await ManualNextPoint(solve1, progress, localCTS.Token);
+                            }
+
+                            var position2 = new Position(solve2.Coordinates, solve2.PositionAngle, Latitude, Longitude, Elevation, refractionParameter);
+                            var point2MountInfo = telescopeMediator.GetInfo();
+                            string point2MountInfoString = "";
+                            if (point2MountInfo.Connected) {
+                                point2MountInfoString = $" - Mount RA: {point2MountInfo.RightAscensionString}; Mount Dec: {point2MountInfo.DeclinationString}";
+                            }
+                            Logger.Info($"Second measurement point {solve2.Coordinates} - Vector: {position2.Vector} - Position Angle: {position2.PositionAngle}{point2MountInfoString}");
+
+                            TPAPAVM.ActivateThirdStep();
+
+
+                            PlateSolveResult solve3 = null;
+                            if (!ManualMode) {
+                                solve3 = await AutomatedNextPoint(progress, localCTS.Token);
+                            } else {
+                                solve3 = await ManualNextPoint(solve2, progress, localCTS.Token);
+                                await CoreUtil.Wait(TimeSpan.FromSeconds(10), localCTS.Token, progress, "Waiting for things to settle. Make sure the scope is tracking and don't move any further!");
+                                solve3 = await Solve(TPAPAVM, 5.0, progress, localCTS.Token);
+                            }
+
+                            var position3 = new Position(solve3.Coordinates, solve3.PositionAngle, Latitude, Longitude, Elevation, refractionParameter);
+
+                            var point3MountInfo = telescopeMediator.GetInfo();
+                            string point3MountInfoString = "";
+                            if (point3MountInfo.Connected) {
+                                point3MountInfoString = $" - Mount RA: {point3MountInfo.RightAscensionString}; Mount Dec: {point3MountInfo.DeclinationString}";
+                            }
+                            Logger.Info($"Third measurement point {solve3.Coordinates} - Vector: {position3.Vector} - Position Angle: {position3.PositionAngle}{point3MountInfoString}");
+
+                            progress?.Report(GetStatus("Calculating Error"));
+
+                            Angle decSpread = Angle.Zero;
+                            if (point1MountInfo.Connected && point2MountInfo.Connected && point3MountInfo.Connected) {
+                                double CalculateDeclinationSpread(double value1, double value2, double value3) {
+                                    double min = Math.Min(value1, Math.Min(value2, value3));
+                                    double max = Math.Max(value1, Math.Max(value2, value3));
+                                    return max - min;
+                                }
+                                decSpread = Angle.ByDegree(CalculateDeclinationSpread(point1MountInfo.Declination, point2MountInfo.Declination, point3MountInfo.Declination));
+                            }
+
+                            // The initial three-point solve is pure calculation, so build it off the caller context
+                            // and only publish the finished result back onto the view model afterwards.
+                            var determination = await Task.Run(() => new PolarErrorDetermination(solve3,
+                                                                                                  position1,
+                                                                                                  position2,
+                                                                                                  position3,
+                                                                                                  Latitude,
+                                                                                                  Longitude,
+                                                                                                  Elevation,
+                                                                                                  refractionParameter,
+                                                                                                  Properties.Settings.Default.RefractionAdjustment,
+                                                                                                  decSpread.ArcSeconds),
+                                                               localCTS.Token);
+                            TPAPAVM.PolarErrorDetermination = determination;
+
+                            Logger.Info($"Calculated Error: Az: {TPAPAVM.PolarErrorDetermination.InitialMountAxisAzimuthError}, Alt: {TPAPAVM.PolarErrorDetermination.InitialMountAxisAltitudeError}, Tot: {TPAPAVM.PolarErrorDetermination.InitialMountAxisTotalError}");
+
+                            TPAPAVM.ActivateFourthStep();
+
+                            if (TPAPAVM.ActiveAlignmentSystemVM != null) {
+                                await TPAPAVM.ActiveAlignmentSystemVM.Connect();
+                                if (TPAPAVM.ActiveAlignmentSystemVM.DoAutomatedAdjustments && !TPAPAVM.ActiveAlignmentSystemVM.Connected) {
+                                    throw new SequenceEntityFailedException("Unable to connect to Polar Alignment system. Cancelling polar alignment routine as automated adjustments are impossible.");
+                                }
+                            }
+
+                            TPAPAVM.ArcsecPerPix = AstroUtil.ArcsecPerPixel(profileService.ActiveProfile.CameraSettings.PixelSize * Binning?.X ?? 1, profileService.ActiveProfile.TelescopeSettings.FocalLength);
+                            var width = TPAPAVM.Image.Image.PixelWidth;
+                            var height = TPAPAVM.Image.Image.PixelHeight;
+                            TPAPAVM.Center = new Point(width / 2, height / 2);
+
+                            await TPAPAVM.UseImageCenterAsReference(localCTS.Token);
+
+                            var monitor = new ConvergenceMonitor(AlignmentTolerance);
+                            var firstObservation = true;
+
+                            var sw = Stopwatch.StartNew();
+                            do {
+                                await WaitIfPaused(localCTS.Token, progress);
+
+                                var continuousSolve = await Solve(TPAPAVM, 0, progress, localCTS.Token);
+                                if (continuousSolve.Success) {
+                                    var estimateStable = await TPAPAVM.UpdateDetails(continuousSolve, progress, localCTS.Token);
+
+                                    if (estimateStable) {
+                                        await messageBroker.Publish(
+                                            new PolarAlignmentErrorMessage(
+                                                correlatedGuid,
+                                                altitudeError: TPAPAVM.PolarErrorDetermination.CurrentMountAxisAltitudeError.Degree,
+                                                azimuthError: TPAPAVM.PolarErrorDetermination.CurrentMountAxisAzimuthError.Degree,
+                                                totalError: TPAPAVM.PolarErrorDetermination.CurrentMountAxisTotalError.Degree
+                                            )
+                                        );
+
+                                        Logger.Info($"Calculated Error: Az: {TPAPAVM.PolarErrorDetermination.CurrentMountAxisAzimuthError}, Alt: {TPAPAVM.PolarErrorDetermination.CurrentMountAxisAltitudeError}, Tot: {TPAPAVM.PolarErrorDetermination.CurrentMountAxisTotalError}");
+
+                                        var totalErrorMinutes = Math.Abs(TPAPAVM.PolarErrorDetermination.CurrentMountAxisTotalError.ArcMinutes);
+                                        if (sw.Elapsed > TimeSpan.FromMinutes(5)) {
+                                            Logger.Info("Correction phase exceeded 5 minutes");
+                                            Notification.ShowInformation($"Polar alignment correction phase has been running for multiple minutes.{Environment.NewLine}Consider restarting the process to improve precision");
+                                            sw.Stop();
+                                            sw.Reset();
+                                        }
+
+                                        // Upstream review principle (PR #13, comment 1): automated-intervention
+                                        // logic must never act on a manual alignment — solve noise and the
+                                        // user's own knob adjustments would otherwise trip the drift detector
+                                        // and the halts. In manual mode every interval is treated as "moved"
+                                        // (the user may well have moved the mount), which disables the
+                                        // stationarity detector, and interventions are downgraded to logs.
+                                        var automatedActive = TPAPAVM.AutomatedAdjustmentsActive;
+                                        var decision = monitor.Observe(totalErrorMinutes,
+                                                                       TPAPAVM.LastCommandedMoveMagnitude,
+                                                                       automatedActive ? TPAPAVM.LastCycleMoved : true,
+                                                                       firstObservation);
+                                        firstObservation = false;
+                                        TPAPAVM.ResetCycleFacts();
+
+                                        if (!automatedActive
+                                            && (decision.Action == ConvergenceAction.FinishBestEffort
+                                                || decision.Action == ConvergenceAction.HaltCalibrationSuspect
+                                                || decision.Action == ConvergenceAction.HaltEstimateDrift)) {
+                                            Logger.Info($"Convergence: {decision.Action} suppressed (manual alignment) - {decision.Reason}");
+                                            decision = new ConvergenceDecision(ConvergenceAction.Continue, "Manual alignment: automated interventions are inactive.");
+                                        }
+
+                                        Logger.Info($"Convergence: {decision.Action} - {decision.Reason}");
+
+                                        switch (decision.Action) {
+                                            case ConvergenceAction.Finish:
+                                                finishedBelowTolerance = true;
+                                                cycleFinishedGracefully = true;
+                                                Notification.ShowInformation(
+                                                    $"Total Error is below alignment tolerance.{Environment.NewLine}{decision.Reason}{Environment.NewLine}Automatically finishing polar alignment.",
+                                                    TimeSpan.FromMinutes(1));
+                                                localCTS.Cancel();
+                                                break;
+
+                                            case ConvergenceAction.FinishBestEffort:
+                                                finishedBelowTolerance = true;
+                                                cycleFinishedGracefully = true;
+                                                Logger.Warning(decision.Reason);
+                                                Notification.ShowInformation(
+                                                    $"Finishing polar alignment at the best achieved error ({monitor.MinimumAchievedArcmin:0.00}').{Environment.NewLine}" +
+                                                    $"The error estimate is no longer reliable — consider a verification run.",
+                                                    TimeSpan.FromMinutes(1));
+                                                localCTS.Cancel();
+                                                break;
+
+                                            case ConvergenceAction.HaltCalibrationSuspect:
+                                                automatedAdjustmentsHalted = true;
+                                                Logger.Error($"Automated adjustments halted: {decision.Reason}");
+                                                Notification.ShowError(
+                                                    $"Automated adjustments halted: the error kept increasing under large corrections.{Environment.NewLine}" +
+                                                    $"Re-run the OAPA Self-Calibration (pointing toward the celestial pole) and restart the alignment,{Environment.NewLine}" +
+                                                    "or resume to keep the error display active for manual adjustment.");
+                                                Pause();
+                                                break;
+
+                                            case ConvergenceAction.HaltEstimateDrift:
+                                                haltWasEstimateDrift = true;
+                                                if (Properties.Settings.Default.AutoVerificationRun && !verificationRunDone && !alignmentWindowClosed) {
+                                                    // Instead of pausing, let this cycle end gracefully so the
+                                                    // shouldVerify check below (which already covers drift-halts)
+                                                    // triggers a fresh verification run automatically.
+                                                    cycleFinishedGracefully = true;
+                                                    Logger.Info($"Automated adjustments halted by estimate drift: {decision.Reason} Starting an automatic verification run with a fresh measurement.");
+                                                    Notification.ShowInformation(
+                                                        "The error estimate appears to have drifted; starting an automatic verification run with a fresh measurement.",
+                                                        TimeSpan.FromMinutes(1));
+                                                    localCTS.Cancel();
+                                                } else {
+                                                    automatedAdjustmentsHalted = true;
+                                                    Logger.Error($"Automated adjustments halted: {decision.Reason}");
+                                                    Notification.ShowError(
+                                                        $"Automated adjustments halted: the error estimate appears to have drifted.{Environment.NewLine}" +
+                                                        $"This is not a calibration problem. Re-run the alignment to re-measure,{Environment.NewLine}" +
+                                                        "or resume to keep the error display active for manual adjustment.");
+                                                    Pause();
+                                                }
+                                                break;
+                                        }
+
+                                        localCTS.Token.ThrowIfCancellationRequested();
+
+                                        // Move only when the monitor wants corrections to continue: confirmation
+                                        // holds keep the motors still so the next solve measures the same state.
+                                        if (decision.Action == ConvergenceAction.Continue && !automatedAdjustmentsHalted) {
+                                            await TPAPAVM.MoveCloser(progress, localCTS.Token);
+                                        }
+                                    } else {
+                                        Logger.Warning("Skipping error publication and automated correction because the continuous estimate was unstable.");
                                     }
                                 }
-                            } else {
-                                Logger.Warning("Skipping error publication and automated correction because the continuous estimate was unstable.");
-                            }
-                        }
 
-                        if (Properties.Settings.Default.AutoPause) {
-                            Pause();
+                                if (Properties.Settings.Default.AutoPause) {
+                                    Pause();
+                                }
+                            } while (!localCTS.Token.IsCancellationRequested);
+                        } catch (OperationCanceledException) when (cycleFinishedGracefully && !token.IsCancellationRequested) {
+                            // ConvergenceAction.Finish/FinishBestEffort — and a drift-halt that hands over to
+                            // the auto verification run — cancel the local token on purpose to
+                            // stop the correction loop. Treat that specific signal as a normal end-of-cycle so
+                            // the verification-run check below can run. Any other cancellation (outer token
+                            // really cancelled, window closed, a solve cancelled for other reasons) still
+                            // propagates out of Execute exactly as before.
                         }
-                    } while (!localCTS.Token.IsCancellationRequested);
+                    }
 
-                    return;
+                    var initialErrorDegrees = Math.Abs(TPAPAVM.PolarErrorDetermination.InitialMountAxisTotalError.Degree);
+                    var shouldVerify = Properties.Settings.Default.AutoVerificationRun
+                        && !verificationRunDone
+                        && !token.IsCancellationRequested
+                        && !alignmentWindowClosed
+                        && (initialErrorDegrees > 2.0 || haltWasEstimateDrift)
+                        && (finishedBelowTolerance || haltWasEstimateDrift);
+
+                    if (!shouldVerify) {
+                        break;
+                    }
+
+                    verificationRunDone = true;
+                    Logger.Info($"Auto verification run: initial error was {initialErrorDegrees:0.00}°" +
+                                (haltWasEstimateDrift ? " and the previous run halted on estimate drift" : "") +
+                                ". Re-running the full measurement and correction once.");
+                    Notification.ShowInformation("Verification run: re-measuring polar alignment with a fresh three-point measurement.");
+                    if (automatedAdjustmentsHalted) { Resume(); }
                 }
+
+                return;
             } catch (OperationCanceledException) {
                 throw;
             } catch (Exception ex) {
