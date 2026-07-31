@@ -49,4 +49,5 @@ InitialProbeArcmin=5, EngageEscalationFactor=3, MaxEngageAttempts=4, DetectionFl
 
 Status notes (update as you go):
 - 2026-07-30: plan written, branch created.
-- 2026-07-31: A complete on feat/oapa-robust-calibration (76f29c4 staged sequence, 181760c VM gate). 94/94. Next rc9 item: B (backlash modes UI + auto-recommendation) on top of this + #17's TryFineNudge; then C provenance.
+- 2026-07-31: A complete on feat/oapa-robust-calibration (76f29c4 staged sequence, 181760c VM gate). 94/94.
+- 2026-07-31: B complete on feat/oapa-backlash-modes (a820d86 integration merge #16(A)+#17 with the Y-clearing/TryFineNudge composition done, 0e1152a modes). 137/137. Base-VM hook: virtual ExecuteRelativeMove (legacy default, OAPA mode plan); sub-compensation skip superseded and removed; Apply sets recommended mode (Michele's decision). NO PRs opened yet - Michele: wait for #16/#17 merge first. Next rc9 item: C (parameter provenance + Apply guard-rail), then D2 (manual controls visibility, checklist, refraction hint), E (precision mode).
