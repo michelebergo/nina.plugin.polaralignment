@@ -554,6 +554,18 @@ namespace NINA.Plugins.PolarAlignment.Properties {
         [global::System.Configuration.UserScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
         [global::System.Configuration.DefaultSettingValueAttribute("False")]
+        public bool PrecisionFinishMode {
+            get {
+                return ((bool)(this["PrecisionFinishMode"]));
+            }
+            set {
+                this["PrecisionFinishMode"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("False")]
         public bool OAPAReverseAzimuth {
             get {
                 return ((bool)(this["OAPAReverseAzimuth"]));

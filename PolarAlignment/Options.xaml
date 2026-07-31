@@ -1,4 +1,4 @@
-﻿<ResourceDictionary
+<ResourceDictionary
     x:Class="NINA.Plugins.PolarAlignment.Options"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -35,6 +35,7 @@
     <s:String x:Key="LogErrorToolTip">When enabled, TPPA writes the current longitude, latitude, altitude error, azimuth error, and total error to its polar-alignment log during continuous updates.</s:String>
     <s:String x:Key="RefractionAdjustmentToolTip">Controls whether TPPA computes the polar error with refraction-aware topocentric coordinates.</s:String>
     <s:String x:Key="UseContinuousErrorEstimatorToolTip">When enabled, TPPA uses the experimental time-aware continuous estimator for live correction error. When disabled, TPPA uses the legacy image-plane calculation.</s:String>
+    <s:String x:Key="PrecisionFinishModeToolTip">Near completion (below 2' of total error) the displayed error and the automatic-finish decision use a rolling average of the last 4 solves instead of a single noisy one, making sub-0.5' finishes reliable. The average restarts after every automated move. The correction controller always sees the raw measurements.</s:String>
     <s:String x:Key="StopTrackingWhenDoneToolTip">When enabled, TPPA turns sidereal tracking off in its cleanup path after the run ends.</s:String>
     <s:String x:Key="AutoPauseToolTip">When enabled, TPPA pauses itself after each continuous-correction update.</s:String>
     <s:String x:Key="PolarAlignmentSystemToolTip">Selects which hardware adjustment system TPPA exposes as the active alignment system: None, UPAS, or OAPA.</s:String>
@@ -67,6 +68,7 @@
                             <ColumnDefinition />
                         </Grid.ColumnDefinitions>
                         <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
@@ -540,8 +542,30 @@
                                 Unit="arcmin"
                                 Visibility="{Binding ActiveSystem.DoAutomatedAdjustments, Converter={StaticResource BooleanToVisibilityConverter}}" />
                         </Grid>
-                        <Button
+                        <TextBlock
                             Grid.Row="26"
+                            Margin="0,5,0,0"
+                            VerticalAlignment="Center"
+                            Text="Precision finish?"
+                            ToolTip="{StaticResource PrecisionFinishModeToolTip}" />
+                        <StackPanel
+                            Grid.Row="26"
+                            Grid.Column="1"
+                            Orientation="Horizontal">
+                            <CheckBox
+                                MinWidth="80"
+                                Margin="5,5,0,0"
+                                HorizontalAlignment="Left"
+                                VerticalAlignment="Center"
+                                IsChecked="{Binding PrecisionFinishMode}"
+                                ToolTip="{StaticResource PrecisionFinishModeToolTip}" />
+                            <TextBlock
+                                Margin="5,5,0,0"
+                                Text="Averages the last solves near completion for reliable sub-0.5' finishes"
+                                Visibility="{Binding PrecisionFinishMode, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                        </StackPanel>
+                        <Button
+                            Grid.Row="27"
                             Margin="0,20,0,0"
                             Command="{Binding ResetSettingsCommand}"
                             ToolTip="{StaticResource ResetSettingsToolTip}">

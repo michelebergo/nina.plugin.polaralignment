@@ -144,6 +144,17 @@ namespace NINA.Plugins.PolarAlignment {
             }
         }
 
+        public bool PrecisionFinishMode {
+            get {
+                return Properties.Settings.Default.PrecisionFinishMode;
+            }
+            set {
+                Properties.Settings.Default.PrecisionFinishMode = value;
+                CoreUtil.SaveSettings(Properties.Settings.Default);
+                RaisePropertyChanged();
+            }
+        }
+
         public double DefaultMoveRate {
             get {
                 return Properties.Settings.Default.DefaultMoveRate;

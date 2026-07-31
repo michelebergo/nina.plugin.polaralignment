@@ -63,6 +63,25 @@ namespace NINA.Plugins.PolarAlignment {
         public UniversalPolarAlignmentOAPAVM UniversalPolarAlignmentOAPAVM => PolarAlignmentPlugin.UniversalPolarAlignmentOAPAVM;
         public IPolarAlignmentSystemVM ActiveAlignmentSystemVM => PolarAlignmentPlugin.ActiveAlignmentSystemVM;
         public bool UseContinuousErrorEstimator => Properties.Settings.Default.UseContinuousErrorEstimator;
+        public bool PrecisionFinishMode => Properties.Settings.Default.PrecisionFinishMode;
+
+        private readonly ErrorEstimateAverager errorEstimateAverager = new ErrorEstimateAverager();
+
+        /// <summary>
+        /// The value the error display and the auto-finish decision should use: the raw
+        /// estimate unless the precision-finish mode is on, in which case it is the
+        /// rolling mean of the recent stable estimates (see <see cref="ErrorEstimateAverager"/>).
+        /// </summary>
+        internal (double azimuthDegrees, double altitudeDegrees) FilterEstimate(double azimuthDegrees, double altitudeDegrees) {
+            return PrecisionFinishMode
+                ? errorEstimateAverager.Register(azimuthDegrees, altitudeDegrees)
+                : (azimuthDegrees, altitudeDegrees);
+        }
+
+        /// <summary>An automated move was commanded: earlier estimate samples no longer describe the state.</summary>
+        internal void OnAutomatedMoveExecuted() {
+            errorEstimateAverager.Reset();
+        }
 
         internal readonly AutomatedAdjustmentController automatedAdjustmentController = new AutomatedAdjustmentController();
         private bool lastContinuousEstimateStable = true;
@@ -206,10 +225,14 @@ namespace NINA.Plugins.PolarAlignment {
                                               token);
 
                 if (estimate.Success) {
-                    PolarErrorDetermination.CurrentMountAxisAzimuthError = Angle.ByDegree(estimate.AzimuthErrorDegrees);
-                    PolarErrorDetermination.CurrentMountAxisAltitudeError = Angle.ByDegree(estimate.AltitudeErrorDegrees);
-                    PolarErrorDetermination.CurrentMountAxisTotalError = Angle.ByDegree(Accord.Math.Tools.Hypotenuse(estimate.AzimuthErrorDegrees, estimate.AltitudeErrorDegrees));
+                    // The controller identifies the per-move response, so it must see the
+                    // raw estimate; only the displayed error and the finish decision use
+                    // the precision-finish rolling mean.
                     automatedAdjustmentController.UpdateObservation(estimate.AzimuthErrorDegrees, estimate.AltitudeErrorDegrees);
+                    var (filteredAzimuth, filteredAltitude) = FilterEstimate(estimate.AzimuthErrorDegrees, estimate.AltitudeErrorDegrees);
+                    PolarErrorDetermination.CurrentMountAxisAzimuthError = Angle.ByDegree(filteredAzimuth);
+                    PolarErrorDetermination.CurrentMountAxisAltitudeError = Angle.ByDegree(filteredAltitude);
+                    PolarErrorDetermination.CurrentMountAxisTotalError = Angle.ByDegree(Accord.Math.Tools.Hypotenuse(filteredAzimuth, filteredAltitude));
                     lastContinuousEstimateStable = true;
                 } else {
                     Logger.Warning($"Continuous polar error estimate was unstable. Condition number: {estimate.ConditionNumber}; residual: {estimate.ResidualArcSeconds}\"");
@@ -332,6 +355,9 @@ namespace NINA.Plugins.PolarAlignment {
 
             var executedX = 0.0;
             var executedY = 0.0;
+            // Any commanded motion - even a failed one, which may have moved partially -
+            // invalidates the precision-finish estimate window.
+            OnAutomatedMoveExecuted();
 
             if (Math.Abs(plan.XMagnitude) > 0) {
                 if (!await activeSystem.TryFineNudgeX((float)plan.XMagnitude, token)) {
@@ -563,10 +589,13 @@ namespace NINA.Plugins.PolarAlignment {
             if (overlay.HasErrorEstimate) {
                 var azimuthErrorDegrees = overlay.AzimuthErrorDegrees.Value;
                 var altitudeErrorDegrees = overlay.AltitudeErrorDegrees.Value;
-                PolarErrorDetermination.CurrentMountAxisAzimuthError = Angle.ByDegree(azimuthErrorDegrees);
-                PolarErrorDetermination.CurrentMountAxisAltitudeError = Angle.ByDegree(altitudeErrorDegrees);
-                PolarErrorDetermination.CurrentMountAxisTotalError = Angle.ByDegree(Accord.Math.Tools.Hypotenuse(altitudeErrorDegrees, azimuthErrorDegrees));
+                // Raw values for the controller's response identification; the display and
+                // the finish decision use the precision-finish rolling mean.
                 automatedAdjustmentController.UpdateObservation(azimuthErrorDegrees, altitudeErrorDegrees);
+                var (filteredAzimuth, filteredAltitude) = FilterEstimate(azimuthErrorDegrees, altitudeErrorDegrees);
+                PolarErrorDetermination.CurrentMountAxisAzimuthError = Angle.ByDegree(filteredAzimuth);
+                PolarErrorDetermination.CurrentMountAxisAltitudeError = Angle.ByDegree(filteredAltitude);
+                PolarErrorDetermination.CurrentMountAxisTotalError = Angle.ByDegree(Accord.Math.Tools.Hypotenuse(filteredAltitude, filteredAzimuth));
                 lastContinuousEstimateStable = true;
             }
 
