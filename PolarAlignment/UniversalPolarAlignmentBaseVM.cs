@@ -103,7 +103,11 @@ namespace NINA.Plugins.PolarAlignment {
             await TryNudgeX(position, token);
         }
 
-        public async Task<bool> TryNudgeX(float position, CancellationToken token) {
+        // Manual nudges keep the legacy contract: always clear backlash on reversal.
+        public Task<bool> TryNudgeX(float position, CancellationToken token) =>
+            TryNudgeXCore(position, skipClearingBelowCompensation: false, token);
+
+        protected async Task<bool> TryNudgeXCore(float position, bool skipClearingBelowCompensation, CancellationToken token) {
             try {
                 if (ReverseAzimuth) { position = position * -1; }
                 await RunOnUi(() => IsNotMoving = false);
@@ -112,7 +116,7 @@ namespace NINA.Plugins.PolarAlignment {
                 var lastDirection = upa.XLastDirection;
                 await upa.MoveRelative(Axis.XAxis, XSpeed, position, token).ConfigureAwait(false);
                 var currentDirection = upa.XLastDirection;
-                await ClearBacklash(Axis.XAxis, XSpeed, lastDirection, currentDirection, token);
+                await ClearBacklash(Axis.XAxis, XSpeed, skipClearingBelowCompensation ? position : float.MaxValue, lastDirection, currentDirection, token);
                 return true;
             } catch (Exception ex) {
                 Logger.Error(ex);
@@ -130,7 +134,11 @@ namespace NINA.Plugins.PolarAlignment {
             await TryNudgeY(position, token);
         }
 
-        public async Task<bool> TryNudgeY(float position, CancellationToken token) {
+        // Manual nudges keep the legacy contract: always clear backlash on reversal.
+        public Task<bool> TryNudgeY(float position, CancellationToken token) =>
+            TryNudgeYCore(position, skipClearingBelowCompensation: false, token);
+
+        protected async Task<bool> TryNudgeYCore(float position, bool skipClearingBelowCompensation, CancellationToken token) {
             try {
                 if (ReverseAltitude) { position = position * -1; }
                 await RunOnUi(() => IsNotMoving = false);
@@ -139,7 +147,7 @@ namespace NINA.Plugins.PolarAlignment {
                 var lastDirection = upa.YLastDirection;
                 await upa.MoveRelative(Axis.YAxis, YSpeed, position, token).ConfigureAwait(false);
                 var currentDirection = upa.YLastDirection;
-                await ClearBacklash(Axis.YAxis, YSpeed, lastDirection, currentDirection, token);
+                await ClearBacklash(Axis.YAxis, YSpeed, skipClearingBelowCompensation ? position : float.MaxValue, lastDirection, currentDirection, token);
                 return true;
             } catch (Exception ex) {
                 Logger.Error(ex);
@@ -151,6 +159,14 @@ namespace NINA.Plugins.PolarAlignment {
                 await RunOnUi(() => IsNotMoving = true);
             }
         }
+
+        /// <summary>
+        /// Automated fine-approach nudges default to the exact manual behavior. Systems
+        /// with a skip-clearing policy (OAPA) override these.
+        /// </summary>
+        public virtual Task<bool> TryFineNudgeX(float position, CancellationToken token) => TryNudgeX(position, token);
+
+        public virtual Task<bool> TryFineNudgeY(float position, CancellationToken token) => TryNudgeY(position, token);
 
         public new void RaiseAllPropertiesChanged() {
             base.RaiseAllPropertiesChanged();
@@ -169,7 +185,7 @@ namespace NINA.Plugins.PolarAlignment {
 
                 await upa.MoveAbsolute(Axis.XAxis, XSpeed, target, token).ConfigureAwait(false);
                 var currentDirection = upa.XLastDirection;
-                await ClearBacklash(Axis.XAxis, XSpeed, lastDirection, currentDirection, token);
+                await ClearBacklash(Axis.XAxis, XSpeed, float.MaxValue, lastDirection, currentDirection, token);
             } catch (Exception ex) {
                 Logger.Error(ex);
                 if (ex is TimeoutException) {
@@ -189,16 +205,30 @@ namespace NINA.Plugins.PolarAlignment {
             return axis == Axis.XAxis ? XBacklashCompensation : 0f;
         }
 
-        private async Task ClearBacklash(Axis axis, int speed, LastDirection lastDirection, LastDirection currentDirection, CancellationToken token) {
-            if (lastDirection != currentDirection) {
-                var compensation = GetBacklashCompensation(axis);
-                if (Math.Abs(compensation) > 0) {
-                    Logger.Info($"Direction changed on {axis}. Clearing backlash");
-                    var sequence = BacklashCompensationPlanner.CreateSequence(compensation, currentDirection);
-                    await upa.MoveRelative(axis, speed, sequence.FirstMove, token).ConfigureAwait(false);
-                    await upa.MoveRelative(axis, speed, sequence.SecondMove, token).ConfigureAwait(false);
-                }
+        private async Task ClearBacklash(Axis axis, int speed, float movedMagnitude, LastDirection lastDirection, LastDirection currentDirection, CancellationToken token) {
+            var compensation = GetBacklashCompensation(axis);
+            if (BacklashCompensationPlanner.ShouldClear(movedMagnitude, compensation, lastDirection, currentDirection)) {
+                Logger.Info($"Direction changed on {axis}. Clearing backlash");
+                var sequence = BacklashCompensationPlanner.CreateSequence(compensation, currentDirection);
+                await upa.MoveRelative(axis, speed, sequence.FirstMove, token).ConfigureAwait(false);
+                await upa.MoveRelative(axis, speed, sequence.SecondMove, token).ConfigureAwait(false);
+            } else if (lastDirection != currentDirection && Math.Abs(compensation) > 0) {
+                Logger.Info($"Direction changed on {axis} but commanded move ({movedMagnitude:F2}) is smaller than the backlash compensation ({compensation:F2}); skipping backlash clearing");
             }
+        }
+
+        /// <summary>
+        /// The base policy keeps the legacy conservative controller profile; systems whose
+        /// hardware tolerates faster convergence (OAPA) opt into the aggressive one.
+        /// </summary>
+        public virtual bool AggressiveCorrectionProfile => false;
+
+        /// <summary>
+        /// Default correction-limit capability: the controller's stock per-cycle bound.
+        /// Systems with a specific policy (e.g. OAPA error-proportional scaling) override this.
+        /// </summary>
+        public virtual double GetMaximumCorrectionMagnitude(double currentTotalErrorArcmin) {
+            return AutomatedAdjustmentController.DefaultMaximumMoveMagnitude;
         }
 
         [RelayCommand(CanExecute = (nameof(IsNotMoving)))]
@@ -213,7 +243,7 @@ namespace NINA.Plugins.PolarAlignment {
                 var lastDirection = upa.YLastDirection;
                 await upa.MoveAbsolute(Axis.YAxis, YSpeed, target, token).ConfigureAwait(false);
                 var currentDirection = upa.YLastDirection;
-                await ClearBacklash(Axis.YAxis, YSpeed, lastDirection, currentDirection, token);
+                await ClearBacklash(Axis.YAxis, YSpeed, float.MaxValue, lastDirection, currentDirection, token);
             } catch (Exception ex) {
                 Logger.Error(ex);
                 if (ex is TimeoutException) {

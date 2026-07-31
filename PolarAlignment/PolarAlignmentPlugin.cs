@@ -23,8 +23,10 @@ using NINA.PlateSolving.Interfaces;
 namespace NINA.Plugins.PolarAlignment {
     [Export(typeof(IPluginManifest))]
     public class PolarAlignmentPlugin : PluginBase, INotifyPropertyChanged {
-        public static UniversalPolarAlignmentVM UniversalPolarAlignmentVM { get; private set; }
-        public static UniversalPolarAlignmentOAPAVM UniversalPolarAlignmentOAPAVM { get; private set; }
+        // Internal setters so tests can populate the instances the selected-system
+        // dispatch reads without constructing the MEF plugin.
+        public static UniversalPolarAlignmentVM UniversalPolarAlignmentVM { get; internal set; }
+        public static UniversalPolarAlignmentOAPAVM UniversalPolarAlignmentOAPAVM { get; internal set; }
 
         public static IPolarAlignmentSystemVM ActiveAlignmentSystemVM =>
             Properties.Settings.Default.SelectedPolarAlignmentSystem switch {
@@ -52,6 +54,21 @@ namespace NINA.Plugins.PolarAlignment {
         public bool IsSystemSelected => SelectedPolarAlignmentSystem != PolarAlignmentSystemType.None;
         public bool IsUPASSelected => SelectedPolarAlignmentSystem == PolarAlignmentSystemType.UPAS;
         public bool IsOAPASelected => SelectedPolarAlignmentSystem == PolarAlignmentSystemType.OAPA;
+
+        /// <summary>
+        /// XAML adapter for the OAPA correction ceiling. The OAPA VM is the sole owner of
+        /// the persisted setting and enforces its clamp; this property only delegates so
+        /// the options page can bind on the plugin object.
+        /// </summary>
+        public double OAPAMaxCorrectionMagnitude {
+            get => UniversalPolarAlignmentOAPAVM?.MaxCorrectionMagnitude ?? Properties.Settings.Default.OAPAMaxCorrectionMagnitude;
+            set {
+                if (UniversalPolarAlignmentOAPAVM != null) {
+                    UniversalPolarAlignmentOAPAVM.MaxCorrectionMagnitude = value;
+                }
+                RaisePropertyChanged();
+            }
+        }
 
         /// <summary>Instance wrapper for XAML binding with PropertyChanged support.</summary>
         public IPolarAlignmentSystemVM ActiveSystem => ActiveAlignmentSystemVM;

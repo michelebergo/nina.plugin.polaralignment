@@ -161,9 +161,54 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
             }
         }
 
+        /// <summary>
+        /// Safety ceiling for the per-cycle correction. Sole owner of the persisted
+        /// setting: the clamp to the controller's configurable bounds lives here, so the
+        /// 1-60 invariant holds no matter which public surface wrote the value (the
+        /// plugin options property is a pure XAML adapter delegating to this one).
+        /// </summary>
+        public double MaxCorrectionMagnitude {
+            get => Properties.Settings.Default.OAPAMaxCorrectionMagnitude;
+            set {
+                var clamped = System.Math.Max(AutomatedAdjustmentController.MinimumConfigurableMoveMagnitude,
+                                              System.Math.Min(AutomatedAdjustmentController.MaximumConfigurableMoveMagnitude, value));
+                Properties.Settings.Default.OAPAMaxCorrectionMagnitude = clamped;
+                CoreUtil.SaveSettings(Properties.Settings.Default);
+                RaisePropertyChanged();
+            }
+        }
+
         // Route the shared clearing logic to the OAPA-specific altitude compensation.
         protected override float GetBacklashCompensation(Axis axis) {
             return axis == Axis.YAxis ? YBacklashCompensation : base.GetBacklashCompensation(axis);
+        }
+
+        // OAPA hardware tolerates the faster profile: error-scaled probes and the 75%
+        // correction candidate. UPAS and other systems keep the legacy behavior.
+        public override bool AggressiveCorrectionProfile => true;
+
+        /// <summary>
+        /// OAPA fine-approach policy: skip the backlash-clearing excursion when the
+        /// corrective nudge is smaller than the compensation itself - with multi-arcminute
+        /// backlash the out-and-back excursion injects more error than the nudge removes.
+        /// Manual nudges are unaffected and always clear on reversal.
+        /// </summary>
+        public override Task<bool> TryFineNudgeX(float position, CancellationToken token) =>
+            TryNudgeXCore(position, skipClearingBelowCompensation: true, token);
+
+        /// <summary>Altitude counterpart: the OAPA altitude axis has its own measured backlash.</summary>
+        public override Task<bool> TryFineNudgeY(float position, CancellationToken token) =>
+            TryNudgeYCore(position, skipClearingBelowCompensation: true, token);
+
+        /// <summary>
+        /// OAPA correction-limit policy: scale with the measured error (80% of the current
+        /// total error) so multi-degree initial errors converge in a handful of cycles,
+        /// with the controller default as the floor for a gentle final approach and the
+        /// user setting as a pure safety ceiling.
+        /// </summary>
+        public override double GetMaximumCorrectionMagnitude(double currentTotalErrorArcmin) {
+            var autoScaled = System.Math.Max(AutomatedAdjustmentController.DefaultMaximumMoveMagnitude, currentTotalErrorArcmin * 0.8);
+            return System.Math.Min(autoScaled, MaxCorrectionMagnitude);
         }
 
         public int XRunCurrent {

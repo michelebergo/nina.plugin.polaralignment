@@ -1,4 +1,4 @@
-﻿using Accord.Math;
+using Accord.Math;
 using Accord.Math.Geometry;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -64,12 +64,20 @@ namespace NINA.Plugins.PolarAlignment {
         public IPolarAlignmentSystemVM ActiveAlignmentSystemVM => PolarAlignmentPlugin.ActiveAlignmentSystemVM;
         public bool UseContinuousErrorEstimator => Properties.Settings.Default.UseContinuousErrorEstimator;
 
-        private readonly AutomatedAdjustmentController automatedAdjustmentController = new AutomatedAdjustmentController();
+        internal readonly AutomatedAdjustmentController automatedAdjustmentController = new AutomatedAdjustmentController();
         private bool lastContinuousEstimateStable = true;
+        private bool runawayNotified;
+
+        /// <summary>
+        /// True when the automated controller detected a runaway (consecutive corrective
+        /// moves made the error worse) and stopped issuing moves.
+        /// </summary>
+        public bool AutomatedAdjustmentsHalted => automatedAdjustmentController.RunawayDetected;
 
         public void ActivateFirstStep() {
             automatedAdjustmentController.Reset();
             lastContinuousEstimateStable = true;
+            runawayNotified = false;
             Steps[0].Active = true;
             Steps[0].Relevant = true;
         }
@@ -298,8 +306,22 @@ namespace NINA.Plugins.PolarAlignment {
                 return;
             }
 
+            // The per-cycle correction limit is a capability of the selected system,
+            // re-evaluated each cycle against the currently measured error.
+            var currentTotalErrorArcmin = Math.Abs(PolarErrorDetermination.CurrentMountAxisTotalError.ArcMinutes);
+            automatedAdjustmentController.MaximumMoveMagnitude = activeSystem.GetMaximumCorrectionMagnitude(currentTotalErrorArcmin);
+            automatedAdjustmentController.AggressiveCorrections = activeSystem.AggressiveCorrectionProfile;
+
             var plan = automatedAdjustmentController.CreatePlan();
             if (!plan.HasMovement) {
+                if (automatedAdjustmentController.RunawayDetected && !runawayNotified) {
+                    runawayNotified = true;
+                    Logger.Error(plan.Reason);
+                    var remedy = automatedAdjustmentController.RunawayLikelyEstimateDrift
+                        ? "This is usually estimate drift, not a calibration problem: re-run the alignment to re-measure. The error display remains active for manual adjustment."
+                        : "Re-check the calibration factors and backlash compensation, then restart the alignment. The error display remains active for manual adjustment.";
+                    Notification.ShowError($"{plan.Reason}{Environment.NewLine}{remedy}");
+                }
                 progress?.Report(new ApplicationStatus() { Status = plan.Reason });
                 return;
             }
@@ -312,7 +334,7 @@ namespace NINA.Plugins.PolarAlignment {
             var executedY = 0.0;
 
             if (Math.Abs(plan.XMagnitude) > 0) {
-                if (!await activeSystem.TryNudgeX((float)plan.XMagnitude, token)) {
+                if (!await activeSystem.TryFineNudgeX((float)plan.XMagnitude, token)) {
                     automatedAdjustmentController.NoteFailedExecution();
                     return;
                 }
@@ -320,7 +342,7 @@ namespace NINA.Plugins.PolarAlignment {
             }
 
             if (Math.Abs(plan.YMagnitude) > 0) {
-                if (!await activeSystem.TryNudgeY((float)plan.YMagnitude, token)) {
+                if (!await activeSystem.TryFineNudgeY((float)plan.YMagnitude, token)) {
                     if (Math.Abs(executedX) > 0) {
                         automatedAdjustmentController.NoteSuccessfulExecution(new AutomatedAdjustmentPlan(executedX,
                                                                                                            0,
