@@ -13,33 +13,18 @@ namespace NINA.Plugins.PolarAlignment.Test {
             new(raDeg, decDeg, altDeg, azDeg);
 
         [Test]
-        public void AngularSeparation_OneDegreeOfDec_IsOneDegree() {
-            var a = Sample(10, 0);
-            var b = Sample(10, 1);
-            OapaCalibrationGeometry.AngularSeparationDegrees(a, b).Should().BeApproximately(1.0, 1e-6);
-        }
-
-        [Test]
-        public void AxisDisplacement_AltitudeAxis_TransfersOneToOne() {
+        public void SignedDisplacement_AltitudeAxis_TransfersOneToOne() {
             var a = Sample(10, 0, altDeg: 60);
-            var b = Sample(10, 0.5, altDeg: 60);
-            OapaCalibrationGeometry.AxisDisplacementArcmin(isAzimuthAxis: false, a, b).Should().BeApproximately(30.0, 0.01);
+            var b = Sample(10, 0.5, altDeg: 60.5);
+            OapaCalibrationGeometry.SignedAxisDisplacementArcmin(isAzimuthAxis: false, a, b).Should().BeApproximately(30.0, 0.01);
         }
 
         [Test]
-        public void AxisDisplacement_AzimuthAxis_CorrectsForCosAltitude() {
-            // At altitude 60°, cos(alt)=0.5: a 30' sky displacement means 60' of axis motion.
-            var a = Sample(10, 0, altDeg: 60);
-            var b = Sample(10, 0.5, altDeg: 60);
-            OapaCalibrationGeometry.AxisDisplacementArcmin(isAzimuthAxis: true, a, b).Should().BeApproximately(60.0, 0.05);
-        }
-
-        [Test]
-        public void AxisDisplacement_AzimuthNearZenith_Throws() {
-            var a = Sample(10, 0, altDeg: 80);
-            var b = Sample(10, 0.5, altDeg: 80);
-            var act = () => OapaCalibrationGeometry.AxisDisplacementArcmin(isAzimuthAxis: true, a, b);
-            act.Should().Throw<InvalidOperationException>().WithMessage("*zenith*");
+        public void SignedDisplacement_AzimuthAxis_CorrectsForCosAltitude() {
+            // At altitude 60°, cos(alt)=0.5: a 30' azimuth sky displacement means 60' of axis motion.
+            var a = Sample(10, 0, altDeg: 60, azDeg: 100.0);
+            var b = Sample(10, 0.5, altDeg: 60, azDeg: 100.5);
+            OapaCalibrationGeometry.SignedAxisDisplacementArcmin(isAzimuthAxis: true, a, b).Should().BeApproximately(60.0, 0.05);
         }
 
         [Test]
@@ -76,87 +61,6 @@ namespace NINA.Plugins.PolarAlignment.Test {
 
             var back = OapaCalibrationGeometry.SignedDisplacementMatchesCommand(isAzimuthAxis: true, b, a, 45f);
             back.Should().BeFalse("0.65° -> 359.9° is negative azimuth motion");
-        }
-
-        [Test]
-        public void ComputeAxisCalibration_CleanLegs_YieldRatioAndZeroBacklash() {
-            // Commanded 45' with ratio 100 moved the sky by 45' on every leg: ratio confirmed, no backlash.
-            var r = OapaCalibrationGeometry.ComputeAxisCalibration(45f, 100f, 45.0, 45.0, 45.0, directionConsistent: true);
-            r.Ratio.Should().BeApproximately(100f, 0.01f);
-            r.BacklashArcmin.Should().Be(0f);
-            r.Consistent.Should().BeTrue();
-            r.Asymmetric.Should().BeFalse();
-        }
-
-        [Test]
-        public void ComputeAxisCalibration_ReversalShortfall_IsMeasuredAsBacklash() {
-            // Clean legs 45', reversal leg only 40': 5' lost to backlash.
-            var r = OapaCalibrationGeometry.ComputeAxisCalibration(45f, 100f, 45.0, 40.0, 45.0, directionConsistent: true);
-            r.BacklashArcmin.Should().BeApproximately(5f, 0.01f);
-        }
-
-        [Test]
-        public void ComputeAxisCalibration_RatioScalesWithMeasuredMotion() {
-            // Commanded 45' only moved the sky 22.5': the true ratio is double the current one.
-            var r = OapaCalibrationGeometry.ComputeAxisCalibration(45f, 100f, 22.5, 22.5, 22.5, directionConsistent: true);
-            r.Ratio.Should().BeApproximately(200f, 0.01f);
-        }
-
-        [Test]
-        public void ComputeAxisCalibration_WrongRatio_BacklashIsPhysical() {
-            // Regression for the coordinate-system bug: current ratio 100, true ratio 200.
-            // Commanded 45' legs physically move 22.5'; the reversal moves 20', so the
-            // physical backlash is 2.5'. The old formula returned 5' (the shortfall scaled
-            // back into the obsolete command system), which after Apply would double the
-            // compensation moves.
-            var r = OapaCalibrationGeometry.ComputeAxisCalibration(45f, 100f, 22.5, 20.0, 22.5, directionConsistent: true);
-            r.Ratio.Should().BeApproximately(200f, 0.01f);
-            r.BacklashArcmin.Should().BeApproximately(2.5f, 0.01f);
-        }
-
-        [Test]
-        public void ComputeAxisCalibration_BacklashEqualsPhysicalShortfallAcrossRatios() {
-            // Invariant: whatever the ratio error, BacklashArcmin is the physical shortfall
-            // clean - reversal, so compensating by it under the discovered ratio reproduces
-            // exactly the lost physical motion.
-            foreach (var (currentRatio, trueRatio, physicalBacklash) in new[] {
-                (100f, 100f, 5.0), (100f, 200f, 2.5), (200f, 100f, 10.0), (50f, 150f, 1.0) }) {
-                var clean = 45.0 * currentRatio / trueRatio;
-                var reversal = clean - physicalBacklash;
-                var r = OapaCalibrationGeometry.ComputeAxisCalibration(45f, currentRatio, clean, reversal, clean, directionConsistent: true);
-                r.BacklashArcmin.Should().BeApproximately((float)physicalBacklash, 0.01f,
-                    $"currentRatio={currentRatio}, trueRatio={trueRatio}");
-            }
-        }
-
-        [Test]
-        public void ComputeAxisCalibration_ExcessiveBacklash_ClampsAgainstPhysicalLeg() {
-            // With a wrong ratio the physical legs are 22.5'; a 17.5' shortfall exceeds half
-            // of the physical leg and must clamp against it, not against the commanded 45'.
-            var warnings = new List<string>();
-            var r = OapaCalibrationGeometry.ComputeAxisCalibration(45f, 100f, 22.5, 5.0, 22.5, directionConsistent: true, warnings.Add);
-            r.BacklashArcmin.Should().BeApproximately(11.25f, 0.01f);
-            warnings.Should().ContainSingle(w => w.Contains("clamping"));
-        }
-
-        [Test]
-        public void ComputeAxisCalibration_LegAsymmetryAboveThreshold_IsFlagged() {
-            var r = OapaCalibrationGeometry.ComputeAxisCalibration(45f, 100f, 45.0, 40.0, 30.0, directionConsistent: true);
-            r.Asymmetric.Should().BeTrue();
-        }
-
-        [Test]
-        public void ComputeAxisCalibration_ExcessiveBacklash_IsClampedWithWarning() {
-            var warnings = new List<string>();
-            var r = OapaCalibrationGeometry.ComputeAxisCalibration(45f, 100f, 45.0, 10.0, 45.0, directionConsistent: true, warnings.Add);
-            r.BacklashArcmin.Should().Be(22.5f);
-            warnings.Should().ContainSingle(w => w.Contains("clamping"));
-        }
-
-        [Test]
-        public void ComputeAxisCalibration_NoMeasurableMotion_Throws() {
-            var act = () => OapaCalibrationGeometry.ComputeAxisCalibration(45f, 100f, 0.05, 0.0, 0.05, directionConsistent: true);
-            act.Should().Throw<InvalidOperationException>().WithMessage("*did not move*");
         }
     }
 
