@@ -14,6 +14,7 @@
         <s:String x:Key="OAPARunCurrentToolTip">Run-current value, in milliamps, sent to the OAPA controller for this axis.</s:String>
         <s:String x:Key="OAPAHoldPercentToolTip">Hold-current percentage sent to the OAPA controller for this axis.</s:String>
         <s:String x:Key="OAPAYBacklashToolTip">Altitude-axis mechanical backlash in arcminutes, measured automatically by the Self-Calibration. Specific to OAPA platforms.</s:String>
+        <s:String x:Key="OAPABacklashModeToolTip">How this axis handles its backlash on direction reversals. Off: no compensation (negligible backlash). Soft: single move extended by 75% of the backlash (conservative if the value may be overestimated). Full: single move extended by the whole backlash. Unidirectional: overshoot past the target and return, so the final approach always comes from the same direction (best for large backlash). Applying a calibration sets the recommended mode automatically.</s:String>
     </UserControl.Resources>
 
     <StackPanel>
@@ -28,6 +29,7 @@
             <GroupBox Header="Azimuth Motor Settings">
                 <Grid>
                     <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
@@ -62,6 +64,9 @@
                     <TextBox Grid.Row="1" Grid.Column="1" VerticalAlignment="Center" Margin="5" Text="{Binding XRunCurrent}" ToolTip="{StaticResource OAPARunCurrentToolTip}" />
                     <TextBlock Grid.Row="1" Grid.Column="2" VerticalAlignment="Center" Margin="5" ToolTip="{StaticResource OAPAHoldPercentToolTip}">Hold %</TextBlock>
                     <TextBox Grid.Row="1" Grid.Column="3" VerticalAlignment="Center" Margin="5" Text="{Binding XHoldPercent}" ToolTip="{StaticResource OAPAHoldPercentToolTip}" />
+
+                    <TextBlock Grid.Row="2" Grid.Column="0" VerticalAlignment="Center" Margin="5" ToolTip="{StaticResource OAPABacklashModeToolTip}">Backlash mode</TextBlock>
+                    <ComboBox Grid.Row="2" Grid.Column="1" VerticalAlignment="Center" Margin="5" ItemsSource="{Binding BacklashModeNames}" SelectedItem="{Binding XBacklashModeName}" ToolTip="{StaticResource OAPABacklashModeToolTip}" />
                 </Grid>
             </GroupBox>
 
@@ -107,6 +112,8 @@
 
                     <TextBlock Grid.Row="2" Grid.Column="0" VerticalAlignment="Center" Margin="5" ToolTip="{StaticResource OAPAYBacklashToolTip}">Backlash (')</TextBlock>
                     <TextBox Grid.Row="2" Grid.Column="1" VerticalAlignment="Center" Margin="5" Text="{Binding YBacklashCompensation}" ToolTip="{StaticResource OAPAYBacklashToolTip}" />
+                    <TextBlock Grid.Row="2" Grid.Column="2" VerticalAlignment="Center" Margin="5" ToolTip="{StaticResource OAPABacklashModeToolTip}">Backlash mode</TextBlock>
+                    <ComboBox Grid.Row="2" Grid.Column="3" VerticalAlignment="Center" Margin="5" ItemsSource="{Binding BacklashModeNames}" SelectedItem="{Binding YBacklashModeName}" ToolTip="{StaticResource OAPABacklashModeToolTip}" />
                 </Grid>
             </GroupBox>
         </Grid>

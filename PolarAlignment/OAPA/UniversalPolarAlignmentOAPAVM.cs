@@ -188,17 +188,59 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
         public override bool AggressiveCorrectionProfile => true;
 
         /// <summary>
-        /// OAPA fine-approach policy: skip the backlash-clearing excursion when the
-        /// corrective nudge is smaller than the compensation itself - with multi-arcminute
-        /// backlash the out-and-back excursion injects more error than the nudge removes.
-        /// Manual nudges are unaffected and always clear on reversal.
+        /// Per-axis backlash handling mode; sole owner of the persisted setting. An
+        /// unrecognized stored value falls back to Full (the single-move compensation).
         /// </summary>
-        public override Task<bool> TryFineNudgeX(float position, CancellationToken token) =>
-            TryNudgeXCore(position, skipClearingBelowCompensation: true, token);
+        public OapaBacklashMode XBacklashMode {
+            get => ParseMode(Properties.Settings.Default.OAPAXBacklashMode);
+            set {
+                Properties.Settings.Default.OAPAXBacklashMode = value.ToString();
+                CoreUtil.SaveSettings(Properties.Settings.Default);
+                RaisePropertyChanged();
+                RaisePropertyChanged(nameof(XBacklashModeName));
+            }
+        }
 
-        /// <summary>Altitude counterpart: the OAPA altitude axis has its own measured backlash.</summary>
-        public override Task<bool> TryFineNudgeY(float position, CancellationToken token) =>
-            TryNudgeYCore(position, skipClearingBelowCompensation: true, token);
+        public OapaBacklashMode YBacklashMode {
+            get => ParseMode(Properties.Settings.Default.OAPAYBacklashMode);
+            set {
+                Properties.Settings.Default.OAPAYBacklashMode = value.ToString();
+                CoreUtil.SaveSettings(Properties.Settings.Default);
+                RaisePropertyChanged();
+                RaisePropertyChanged(nameof(YBacklashModeName));
+            }
+        }
+
+        private static OapaBacklashMode ParseMode(string stored) =>
+            Enum.TryParse<OapaBacklashMode>(stored, out var mode) ? mode : OapaBacklashMode.Full;
+
+        // String adapters for the XAML ComboBoxes.
+        public string[] BacklashModeNames => Enum.GetNames(typeof(OapaBacklashMode));
+        public string XBacklashModeName {
+            get => XBacklashMode.ToString();
+            set { if (Enum.TryParse<OapaBacklashMode>(value, out var mode)) { XBacklashMode = mode; } }
+        }
+        public string YBacklashModeName {
+            get => YBacklashMode.ToString();
+            set { if (Enum.TryParse<OapaBacklashMode>(value, out var mode)) { YBacklashMode = mode; } }
+        }
+
+        /// <summary>
+        /// OAPA relative moves replace the legacy clear-after-move excursion with the
+        /// per-axis backlash-mode plan: the compensation is folded into the move itself
+        /// (Full/Soft) or the target is approached from the engaged direction only
+        /// (Unidirectional). Serves both the manual and the automated fine-approach path.
+        /// </summary>
+        protected override async Task ExecuteRelativeMove(Axis axis, int speed, float position, CancellationToken token) {
+            var mode = axis == Axis.XAxis ? XBacklashMode : YBacklashMode;
+            var plan = BacklashModePlanner.PlanMoves(mode, position, GetBacklashCompensation(axis), LastDirectionOf(axis));
+            if (plan.Length > 1 || System.Math.Abs(plan[0] - position) > float.Epsilon) {
+                Logger.Info($"OAPA backlash mode {mode} on {axis}: move {position:F2}' planned as [{string.Join(", ", plan)}]");
+            }
+            foreach (var move in plan) {
+                await upa.MoveRelative(axis, speed, move, token).ConfigureAwait(false);
+            }
+        }
 
         /// <summary>
         /// OAPA correction-limit policy: scale with the measured error (80% of the current
@@ -350,6 +392,14 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
         [ObservableProperty]
         private float discoveredYBacklash;
 
+        // Solve noise measured by the calibration (S0), kept per axis so Apply can derive
+        // the recommended backlash mode from backlash-vs-noise.
+        [ObservableProperty]
+        private float discoveredXNoise;
+
+        [ObservableProperty]
+        private float discoveredYNoise;
+
         [ObservableProperty]
         private string calibrationConsistencyMessage = string.Empty;
 
@@ -447,6 +497,8 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
                         DiscoveredYRatio = y.Ratio;
                         DiscoveredXBacklash = x.BacklashArcmin;
                         DiscoveredYBacklash = y.BacklashArcmin;
+                        DiscoveredXNoise = x.NoiseSigmaArcmin;
+                        DiscoveredYNoise = y.NoiseSigmaArcmin;
                         CalibrationSlippageDetected = slippage;
                         CalibrationConsistencyMessage = consistencyMsg;
                         CalibrationStatus = $"Done. X={x.Ratio:F2}, Y={y.Ratio:F2}, backlash X={x.BacklashArcmin:F2}', Y={y.BacklashArcmin:F2}'";
@@ -481,10 +533,14 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
                 YGearRatio = DiscoveredYRatio;
                 XBacklashCompensation = DiscoveredXBacklash;
                 YBacklashCompensation = DiscoveredYBacklash;
+                // Applying the calibration includes picking the backlash strategy the
+                // measurements call for; the change is stated explicitly, never silent.
+                XBacklashMode = BacklashModePlanner.Recommend(DiscoveredXBacklash, DiscoveredXNoise);
+                YBacklashMode = BacklashModePlanner.Recommend(DiscoveredYBacklash, DiscoveredYNoise);
                 HasCalibrationResult = false;
-                CalibrationStatus = "Applied";
-                Logger.Info($"OAPA calibration applied: X={DiscoveredXRatio:F2}, Y={DiscoveredYRatio:F2}, backlash X={DiscoveredXBacklash:F2}', Y={DiscoveredYBacklash:F2}'");
-                Notification.ShowInformation("Calibration factors and backlash compensation updated", TimeSpan.FromSeconds(30));
+                CalibrationStatus = $"Applied. Backlash mode set to X: {XBacklashMode}, Y: {YBacklashMode} (from the measured {DiscoveredXBacklash:F1}'/{DiscoveredYBacklash:F1}')";
+                Logger.Info($"OAPA calibration applied: X={DiscoveredXRatio:F2}, Y={DiscoveredYRatio:F2}, backlash X={DiscoveredXBacklash:F2}', Y={DiscoveredYBacklash:F2}', modes X={XBacklashMode}, Y={YBacklashMode}");
+                Notification.ShowInformation($"Calibration applied. Backlash mode X: {XBacklashMode}, Y: {YBacklashMode}", TimeSpan.FromSeconds(30));
             } catch (Exception ex) {
                 Logger.Error(ex);
                 Notification.ShowError($"Failed to apply calibration: {ex.Message}");

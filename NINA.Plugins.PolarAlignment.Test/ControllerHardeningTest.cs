@@ -312,21 +312,6 @@ namespace NINA.Plugins.PolarAlignment.Test {
             controller.RunawayDetected.Should().BeFalse();
         }
 
-        [Test]
-        public void ShouldClear_OnlyOnReversalWithMoveAtLeastCompensation() {
-            // No direction change: never clear.
-            BacklashCompensationPlanner.ShouldClear(10f, 5f, LastDirection.Positive, LastDirection.Positive).Should().BeFalse();
-            // No compensation configured: nothing to clear.
-            BacklashCompensationPlanner.ShouldClear(10f, 0f, LastDirection.Positive, LastDirection.Negative).Should().BeFalse();
-            // Reversal with a move larger than the compensation: clear.
-            BacklashCompensationPlanner.ShouldClear(6f, 5f, LastDirection.Positive, LastDirection.Negative).Should().BeTrue();
-            // Reversal with a sub-compensation nudge: skipping avoids the out-and-back
-            // excursion that injects more error than the nudge removes.
-            BacklashCompensationPlanner.ShouldClear(0.5f, 5f, LastDirection.Positive, LastDirection.Negative).Should().BeFalse();
-            // Manual absolute moves pass float.MaxValue and always clear on reversal.
-            BacklashCompensationPlanner.ShouldClear(float.MaxValue, 5f, LastDirection.Negative, LastDirection.Positive).Should().BeTrue();
-        }
-
         private static ClosedLoopResult RunClosedLoop(AutomatedAdjustmentController controller,
                                                       double[,] plant,
                                                       double initialAzimuthErrorDegrees,

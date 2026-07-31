@@ -9,9 +9,10 @@ using System.Threading.Tasks;
 namespace NINA.Plugins.PolarAlignment.Test {
 
     /// <summary>
-    /// The skip-clearing policy for sub-compensation nudges belongs exclusively to the
-    /// OAPA automated fine-approach path. Manual nudges - on every system - and the UPAS
-    /// automated path must keep the legacy behavior: always clear backlash on reversal.
+    /// UPAS keeps the legacy backlash contract on every path - manual and automated
+    /// fine-approach nudges always clear with the out-and-back excursion on reversal.
+    /// OAPA routes both paths through its backlash-mode plan instead (the per-mode
+    /// behavior itself is covered in OapaBacklashModeVmTest).
     /// </summary>
     public class FineNudgeBacklashTest {
 
@@ -90,32 +91,20 @@ namespace NINA.Plugins.PolarAlignment.Test {
         }
 
         [Test]
-        public async Task ManualNudge_OAPA_SubCompensationReversal_StillClears() {
+        public async Task ManualAndFineNudge_OAPA_FollowTheSameModePlan() {
+            // OAPA replaces the legacy excursion with its mode plan on both paths: under
+            // the default Full mode a reversal is a single move extended by the backlash.
             var (vm, system) = Prepare(new UniversalPolarAlignmentOAPAVM(null, null, null, null, null));
+            ((UniversalPolarAlignmentOAPAVM)vm).XBacklashMode = OapaBacklashMode.Full;
 
             await RunReversal(vm, system, fine: false, reversalMove: -0.5f);
+            system.RelativeMoves.Should().Equal((Axis.XAxis, -5.5f));
 
-            system.RelativeMoves.Should().Equal(
-                new[] { (Axis.XAxis, -0.5f) }.Concat(ClearingSequence));
-        }
-
-        [Test]
-        public async Task FineNudge_OAPA_SubCompensationReversal_SkipsClearing() {
-            var (vm, system) = Prepare(new UniversalPolarAlignmentOAPAVM(null, null, null, null, null));
-
-            await RunReversal(vm, system, fine: true, reversalMove: -0.5f);
-
-            system.RelativeMoves.Should().Equal((Axis.XAxis, -0.5f));
-        }
-
-        [Test]
-        public async Task FineNudge_OAPA_MoveAtLeastCompensation_Clears() {
-            var (vm, system) = Prepare(new UniversalPolarAlignmentOAPAVM(null, null, null, null, null));
-
-            await RunReversal(vm, system, fine: true, reversalMove: -6f);
-
-            system.RelativeMoves.Should().Equal(
-                new[] { (Axis.XAxis, -6f) }.Concat(ClearingSequence));
+            system.RelativeMoves.Clear();
+            (await vm.TryNudgeX(15f, CancellationToken.None)).Should().BeTrue();
+            system.RelativeMoves.Clear();
+            (await vm.TryFineNudgeX(-0.5f, CancellationToken.None)).Should().BeTrue();
+            system.RelativeMoves.Should().Equal((Axis.XAxis, -5.5f));
         }
 
         [Test]

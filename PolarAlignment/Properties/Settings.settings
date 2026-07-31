@@ -116,6 +116,12 @@
     <Setting Name="OAPAMaxCorrectionMagnitude" Type="System.Double" Scope="User">
       <Value Profile="(Default)">30</Value>
     </Setting>
+    <Setting Name="OAPAXBacklashMode" Type="System.String" Scope="User">
+      <Value Profile="(Default)">Full</Value>
+    </Setting>
+    <Setting Name="OAPAYBacklashMode" Type="System.String" Scope="User">
+      <Value Profile="(Default)">Full</Value>
+    </Setting>
     <Setting Name="OAPAReverseAzimuth" Type="System.Boolean" Scope="User">
       <Value Profile="(Default)">False</Value>
     </Setting>

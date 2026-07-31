@@ -62,11 +62,13 @@ namespace NINA.Plugins.PolarAlignment.Test {
             vm.ReverseAltitude = false;
             vm.XBacklashCompensation = xCompensation;
             vm.YBacklashCompensation = yCompensation;
+            vm.XBacklashMode = OapaBacklashMode.Full;
+            vm.YBacklashMode = OapaBacklashMode.Full;
             return (vm, system);
         }
 
         [Test]
-        public async Task TryNudgeY_OnReversal_ClearsBacklashWithAltitudeCompensation() {
+        public async Task TryNudgeY_OnReversal_FoldsTheAltitudeCompensationIntoTheMove() {
             var (vm, system) = OapaVm(xCompensation: 3f, yCompensation: 5f);
 
             (await vm.TryNudgeY(15, CancellationToken.None)).Should().BeTrue();
@@ -74,11 +76,8 @@ namespace NINA.Plugins.PolarAlignment.Test {
 
             (await vm.TryNudgeY(-15, CancellationToken.None)).Should().BeTrue();
 
-            var expected = BacklashCompensationPlanner.CreateSequence(5f, LastDirection.Negative);
-            system.RelativeMoves.Should().Equal(
-                (Axis.YAxis, -15f),
-                (Axis.YAxis, expected.FirstMove),
-                (Axis.YAxis, expected.SecondMove));
+            // Full mode: a single move of d+B, no out-and-back excursion.
+            system.RelativeMoves.Should().Equal((Axis.YAxis, -20f));
         }
 
         [Test]
@@ -94,7 +93,9 @@ namespace NINA.Plugins.PolarAlignment.Test {
         }
 
         [Test]
-        public async Task MoveY_OnReversal_ClearsBacklashWithAltitudeCompensation() {
+        public async Task MoveY_Absolute_KeepsTheLegacyClearingExcursion() {
+            // The backlash modes govern relative nudges; absolute moves keep the legacy
+            // clear-after-move contract on every system.
             var (vm, system) = OapaVm(xCompensation: 3f, yCompensation: 5f);
 
             await vm.TryNudgeY(15, CancellationToken.None);
@@ -111,7 +112,7 @@ namespace NINA.Plugins.PolarAlignment.Test {
         }
 
         [Test]
-        public async Task TryNudgeX_OnReversal_SequenceUnchangedByYWiring() {
+        public async Task TryNudgeX_OnReversal_FoldsTheAzimuthCompensationIntoTheMove() {
             var (vm, system) = OapaVm(xCompensation: 3f, yCompensation: 5f);
 
             await vm.TryNudgeX(15, CancellationToken.None);
@@ -119,11 +120,7 @@ namespace NINA.Plugins.PolarAlignment.Test {
 
             await vm.TryNudgeX(-15, CancellationToken.None);
 
-            var expected = BacklashCompensationPlanner.CreateSequence(3f, LastDirection.Negative);
-            system.RelativeMoves.Should().Equal(
-                (Axis.XAxis, -15f),
-                (Axis.XAxis, expected.FirstMove),
-                (Axis.XAxis, expected.SecondMove));
+            system.RelativeMoves.Should().Equal((Axis.XAxis, -18f));
         }
 
         [Test]

@@ -481,6 +481,30 @@ namespace NINA.Plugins.PolarAlignment.Properties {
 
         [global::System.Configuration.UserScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("Full")]
+        public string OAPAXBacklashMode {
+            get {
+                return ((string)(this["OAPAXBacklashMode"]));
+            }
+            set {
+                this["OAPAXBacklashMode"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("Full")]
+        public string OAPAYBacklashMode {
+            get {
+                return ((string)(this["OAPAYBacklashMode"]));
+            }
+            set {
+                this["OAPAYBacklashMode"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
         [global::System.Configuration.DefaultSettingValueAttribute("False")]
         public bool OAPAReverseAzimuth {
             get {
