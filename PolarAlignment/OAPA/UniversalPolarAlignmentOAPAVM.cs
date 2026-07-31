@@ -15,7 +15,8 @@ using System.Windows;
 
 namespace NINA.Plugins.PolarAlignment.OAPA {
     public partial class UniversalPolarAlignmentOAPAVM : UniversalPolarAlignmentBaseVM {
-        private readonly IOapaCalibrationSolver calibrationSolver;
+        // Internal so tests can substitute the solver boundary; production assigns it once in the ctor.
+        internal IOapaCalibrationSolver calibrationSolver;
         private readonly ICameraMediator cameraMediator;
         private readonly CameraBlockToken cameraBlockToken = new();
 
@@ -307,6 +308,14 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
         [ObservableProperty]
         private string calibrationConsistencyMessage = string.Empty;
 
+        // Slipping mechanics have no valid constant compensation: the measured values stay
+        // visible for diagnosis, but applying them is blocked.
+        [ObservableProperty]
+        [NotifyCanExecuteChangedFor(nameof(ApplyCalibrationCommand))]
+        private bool calibrationSlippageDetected;
+
+        public bool CanApplyCalibration() => HasCalibrationResult && !CalibrationSlippageDetected;
+
         public bool CanCalibrate() => Connected && IsNotMoving && !CalibrationRunning && CameraIsFree();
 
         // The capture block owner is identified by reference; a dedicated token keeps the
@@ -345,6 +354,7 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
                         IsNotMoving = false;
                         CalibrationRunning = true;
                         HasCalibrationResult = false;
+                        CalibrationSlippageDetected = false;
                         CalibrationStatus = "Starting calibration...";
                         CalibrationConsistencyMessage = string.Empty;
                     });
@@ -376,8 +386,15 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
                         consistencyMsg = $"Direction consistency: WARNING (X={(x.Consistent ? "ok" : "fail")}, Y={(y.Consistent ? "ok" : "fail")}). Auto-flip did not resolve it; check wiring.";
                     }
                     if (x.Asymmetric || y.Asymmetric) {
-                        var axes = x.Asymmetric && y.Asymmetric ? "X and Y" : (x.Asymmetric ? "X" : "Y");
-                        consistencyMsg += $" \u26a0 Forward/reverse legs on {axes} differ by more than 20%: the discovered values may be unreliable. Re-run with the scope pointing at a lower-altitude, star-rich field.";
+                        var details = new List<string>();
+                        if (x.Asymmetric) { details.Add($"X forward {x.ForwardRatio:F1} / reverse {x.ReverseRatio:F1}"); }
+                        if (y.Asymmetric) { details.Add($"Y forward {y.ForwardRatio:F1} / reverse {y.ReverseRatio:F1}"); }
+                        consistencyMsg += $" \u26a0 The axis responds differently per direction ({string.Join("; ", details)}). The applied factor is the mean; convergence may take a few extra cycles.";
+                    }
+                    var slippage = x.SlippageDetected || y.SlippageDetected;
+                    if (slippage) {
+                        var axes = x.SlippageDetected && y.SlippageDetected ? "X and Y" : (x.SlippageDetected ? "X" : "Y");
+                        consistencyMsg += $" \u26a0 Slippage detected on {axes}: the backlash is not repeatable, so no constant compensation is valid. Apply is disabled - check grub screws, belt tension and friction, then re-run the calibration.";
                     }
 
                     await RunOnUi(() => {
@@ -385,6 +402,7 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
                         DiscoveredYRatio = y.Ratio;
                         DiscoveredXBacklash = x.BacklashArcmin;
                         DiscoveredYBacklash = y.BacklashArcmin;
+                        CalibrationSlippageDetected = slippage;
                         CalibrationConsistencyMessage = consistencyMsg;
                         CalibrationStatus = $"Done. X={x.Ratio:F2}, Y={y.Ratio:F2}, backlash X={x.BacklashArcmin:F2}', Y={y.BacklashArcmin:F2}'";
                         HasCalibrationResult = true;
@@ -411,7 +429,7 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
             });
         }
 
-        [RelayCommand(CanExecute = nameof(HasCalibrationResult))]
+        [RelayCommand(CanExecute = nameof(CanApplyCalibration))]
         public void ApplyCalibration() {
             try {
                 XGearRatio = DiscoveredXRatio;
