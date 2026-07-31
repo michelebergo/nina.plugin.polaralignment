@@ -58,7 +58,10 @@
                         </ComboBox.ItemsSource>
                     </ComboBox>
                     <TextBlock Grid.Row="0" Grid.Column="2" VerticalAlignment="Center" Margin="5" ToolTip="{StaticResource OAPAGearRatioToolTip}">Calibration Factor</TextBlock>
-                    <TextBox Grid.Row="0" Grid.Column="3" VerticalAlignment="Center" Margin="5" Text="{Binding XGearRatio}" ToolTip="{StaticResource OAPAGearRatioToolTip}" />
+                    <DockPanel Grid.Row="0" Grid.Column="3">
+                        <TextBlock DockPanel.Dock="Right" VerticalAlignment="Center" Margin="2,0,5,0" Opacity="0.6" FontSize="10" Text="{Binding XGearRatioSourceLabel}" />
+                        <TextBox VerticalAlignment="Center" Margin="5" Text="{Binding XGearRatio}" ToolTip="{StaticResource OAPAGearRatioToolTip}" />
+                    </DockPanel>
 
                     <TextBlock Grid.Row="1" Grid.Column="0" VerticalAlignment="Center" Margin="5" ToolTip="{StaticResource OAPARunCurrentToolTip}">Run (mA)</TextBlock>
                     <TextBox Grid.Row="1" Grid.Column="1" VerticalAlignment="Center" Margin="5" Text="{Binding XRunCurrent}" ToolTip="{StaticResource OAPARunCurrentToolTip}" />
@@ -103,7 +106,10 @@
                         </ComboBox.ItemsSource>
                     </ComboBox>
                     <TextBlock Grid.Row="0" Grid.Column="2" VerticalAlignment="Center" Margin="5" ToolTip="{StaticResource OAPAGearRatioToolTip}">Calibration Factor</TextBlock>
-                    <TextBox Grid.Row="0" Grid.Column="3" VerticalAlignment="Center" Margin="5" Text="{Binding YGearRatio}" ToolTip="{StaticResource OAPAGearRatioToolTip}" />
+                    <DockPanel Grid.Row="0" Grid.Column="3">
+                        <TextBlock DockPanel.Dock="Right" VerticalAlignment="Center" Margin="2,0,5,0" Opacity="0.6" FontSize="10" Text="{Binding YGearRatioSourceLabel}" />
+                        <TextBox VerticalAlignment="Center" Margin="5" Text="{Binding YGearRatio}" ToolTip="{StaticResource OAPAGearRatioToolTip}" />
+                    </DockPanel>
 
                     <TextBlock Grid.Row="1" Grid.Column="0" VerticalAlignment="Center" Margin="5" ToolTip="{StaticResource OAPARunCurrentToolTip}">Run (mA)</TextBlock>
                     <TextBox Grid.Row="1" Grid.Column="1" VerticalAlignment="Center" Margin="5" Text="{Binding YRunCurrent}" ToolTip="{StaticResource OAPARunCurrentToolTip}" />
@@ -111,7 +117,10 @@
                     <TextBox Grid.Row="1" Grid.Column="3" VerticalAlignment="Center" Margin="5" Text="{Binding YHoldPercent}" ToolTip="{StaticResource OAPAHoldPercentToolTip}" />
 
                     <TextBlock Grid.Row="2" Grid.Column="0" VerticalAlignment="Center" Margin="5" ToolTip="{StaticResource OAPAYBacklashToolTip}">Backlash (')</TextBlock>
-                    <TextBox Grid.Row="2" Grid.Column="1" VerticalAlignment="Center" Margin="5" Text="{Binding YBacklashCompensation}" ToolTip="{StaticResource OAPAYBacklashToolTip}" />
+                    <DockPanel Grid.Row="2" Grid.Column="1">
+                        <TextBlock DockPanel.Dock="Right" VerticalAlignment="Center" Margin="2,0,5,0" Opacity="0.6" FontSize="10" Text="{Binding YBacklashSourceLabel}" />
+                        <TextBox VerticalAlignment="Center" Margin="5" Text="{Binding YBacklashCompensation}" ToolTip="{StaticResource OAPAYBacklashToolTip}" />
+                    </DockPanel>
                     <TextBlock Grid.Row="2" Grid.Column="2" VerticalAlignment="Center" Margin="5" ToolTip="{StaticResource OAPABacklashModeToolTip}">Backlash mode</TextBlock>
                     <ComboBox Grid.Row="2" Grid.Column="3" VerticalAlignment="Center" Margin="5" ItemsSource="{Binding BacklashModeNames}" SelectedItem="{Binding YBacklashModeName}" ToolTip="{StaticResource OAPABacklashModeToolTip}" />
                 </Grid>

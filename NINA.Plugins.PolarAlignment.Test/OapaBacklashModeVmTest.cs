@@ -105,6 +105,11 @@ namespace NINA.Plugins.PolarAlignment.Test {
             vm.upa = new FakeSystem();
             vm.XBacklashMode = OapaBacklashMode.Full;
             vm.YBacklashMode = OapaBacklashMode.Full;
+            // Arranged values are test fixtures, not manual user edits: keep Apply single-step.
+            Properties.Settings.Default.OAPAXGearRatioSource = "Default";
+            Properties.Settings.Default.OAPAYGearRatioSource = "Default";
+            Properties.Settings.Default.OAPAXBacklashSource = "Default";
+            Properties.Settings.Default.OAPAYBacklashSource = "Default";
             vm.DiscoveredXRatio = 100;
             vm.DiscoveredYRatio = 100;
             vm.DiscoveredXBacklash = 0.2f;   // below measurability -> Off

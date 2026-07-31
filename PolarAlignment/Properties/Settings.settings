@@ -122,6 +122,18 @@
     <Setting Name="OAPAYBacklashMode" Type="System.String" Scope="User">
       <Value Profile="(Default)">Full</Value>
     </Setting>
+    <Setting Name="OAPAXGearRatioSource" Type="System.String" Scope="User">
+      <Value Profile="(Default)">Default</Value>
+    </Setting>
+    <Setting Name="OAPAYGearRatioSource" Type="System.String" Scope="User">
+      <Value Profile="(Default)">Default</Value>
+    </Setting>
+    <Setting Name="OAPAXBacklashSource" Type="System.String" Scope="User">
+      <Value Profile="(Default)">Default</Value>
+    </Setting>
+    <Setting Name="OAPAYBacklashSource" Type="System.String" Scope="User">
+      <Value Profile="(Default)">Default</Value>
+    </Setting>
     <Setting Name="OAPAReverseAzimuth" Type="System.Boolean" Scope="User">
       <Value Profile="(Default)">False</Value>
     </Setting>

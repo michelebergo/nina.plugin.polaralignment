@@ -505,6 +505,54 @@ namespace NINA.Plugins.PolarAlignment.Properties {
 
         [global::System.Configuration.UserScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("Default")]
+        public string OAPAXGearRatioSource {
+            get {
+                return ((string)(this["OAPAXGearRatioSource"]));
+            }
+            set {
+                this["OAPAXGearRatioSource"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("Default")]
+        public string OAPAYGearRatioSource {
+            get {
+                return ((string)(this["OAPAYGearRatioSource"]));
+            }
+            set {
+                this["OAPAYGearRatioSource"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("Default")]
+        public string OAPAXBacklashSource {
+            get {
+                return ((string)(this["OAPAXBacklashSource"]));
+            }
+            set {
+                this["OAPAXBacklashSource"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("Default")]
+        public string OAPAYBacklashSource {
+            get {
+                return ((string)(this["OAPAYBacklashSource"]));
+            }
+            set {
+                this["OAPAYBacklashSource"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
         [global::System.Configuration.DefaultSettingValueAttribute("False")]
         public bool OAPAReverseAzimuth {
             get {

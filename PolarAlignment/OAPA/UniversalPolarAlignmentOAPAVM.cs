@@ -81,15 +81,20 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
 
         public override float XGearRatio {
             get => Properties.Settings.Default.OAPAXGearRatio;
-            set {
-                if (value < 1) { value = 1; }
-                Properties.Settings.Default.OAPAXGearRatio = value;
-                if (upa != null) { upa.XGearRatio = value; }
-                CoreUtil.SaveSettings(Properties.Settings.Default);
-                RaisePropertyChanged();
-                RaisePropertyChanged(nameof(PositionX));
-                RefreshHomeDisplay();
-            }
+            set => SetXGearRatio(value, MarkEdit(value, XGearRatio, XGearRatioSource));
+        }
+
+        private void SetXGearRatio(float value, OapaParameterSource source) {
+            value = System.Math.Clamp(value, MinimumFactor, MaximumFactor);
+            Properties.Settings.Default.OAPAXGearRatio = value;
+            Properties.Settings.Default.OAPAXGearRatioSource = source.ToString();
+            if (upa != null) { upa.XGearRatio = value; }
+            CoreUtil.SaveSettings(Properties.Settings.Default);
+            RaisePropertyChanged(nameof(XGearRatio));
+            RaisePropertyChanged(nameof(XGearRatioSource));
+            RaisePropertyChanged(nameof(XGearRatioSourceLabel));
+            RaisePropertyChanged(nameof(PositionX));
+            RefreshHomeDisplay();
         }
 
         public override int XSpeed {
@@ -103,15 +108,20 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
 
         public override float YGearRatio {
             get => Properties.Settings.Default.OAPAYGearRatio;
-            set {
-                if (value < 1) { value = 1; }
-                Properties.Settings.Default.OAPAYGearRatio = value;
-                if (upa != null) { upa.YGearRatio = value; }
-                CoreUtil.SaveSettings(Properties.Settings.Default);
-                RaisePropertyChanged();
-                RaisePropertyChanged(nameof(PositionY));
-                RefreshHomeDisplay();
-            }
+            set => SetYGearRatio(value, MarkEdit(value, YGearRatio, YGearRatioSource));
+        }
+
+        private void SetYGearRatio(float value, OapaParameterSource source) {
+            value = System.Math.Clamp(value, MinimumFactor, MaximumFactor);
+            Properties.Settings.Default.OAPAYGearRatio = value;
+            Properties.Settings.Default.OAPAYGearRatioSource = source.ToString();
+            if (upa != null) { upa.YGearRatio = value; }
+            CoreUtil.SaveSettings(Properties.Settings.Default);
+            RaisePropertyChanged(nameof(YGearRatio));
+            RaisePropertyChanged(nameof(YGearRatioSource));
+            RaisePropertyChanged(nameof(YGearRatioSourceLabel));
+            RaisePropertyChanged(nameof(PositionY));
+            RefreshHomeDisplay();
         }
 
         public override int YSpeed {
@@ -143,23 +153,65 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
 
         public override float XBacklashCompensation {
             get => Properties.Settings.Default.OAPAXBacklashCompensation;
-            set {
-                Properties.Settings.Default.OAPAXBacklashCompensation = value;
-                CoreUtil.SaveSettings(Properties.Settings.Default);
-                RaisePropertyChanged();
-            }
+            set => SetXBacklash(value, MarkEdit(value, XBacklashCompensation, XBacklashSource));
+        }
+
+        private void SetXBacklash(float value, OapaParameterSource source) {
+            value = System.Math.Clamp(value, 0f, MaximumBacklashArcmin);
+            Properties.Settings.Default.OAPAXBacklashCompensation = value;
+            Properties.Settings.Default.OAPAXBacklashSource = source.ToString();
+            CoreUtil.SaveSettings(Properties.Settings.Default);
+            RaisePropertyChanged(nameof(XBacklashCompensation));
+            RaisePropertyChanged(nameof(XBacklashSource));
         }
 
         // OAPA-specific: the altitude axis of an OAPA platform also has measurable backlash.
         // Deliberately not part of the shared VM contract - other systems do not model it.
         public float YBacklashCompensation {
             get => Properties.Settings.Default.OAPAYBacklashCompensation;
-            set {
-                Properties.Settings.Default.OAPAYBacklashCompensation = value;
-                CoreUtil.SaveSettings(Properties.Settings.Default);
-                RaisePropertyChanged();
-            }
+            set => SetYBacklash(value, MarkEdit(value, YBacklashCompensation, YBacklashSource));
         }
+
+        private void SetYBacklash(float value, OapaParameterSource source) {
+            value = System.Math.Clamp(value, 0f, MaximumBacklashArcmin);
+            Properties.Settings.Default.OAPAYBacklashCompensation = value;
+            Properties.Settings.Default.OAPAYBacklashSource = source.ToString();
+            CoreUtil.SaveSettings(Properties.Settings.Default);
+            RaisePropertyChanged(nameof(YBacklashCompensation));
+            RaisePropertyChanged(nameof(YBacklashSource));
+            RaisePropertyChanged(nameof(YBacklashSourceLabel));
+        }
+
+        // ----- Parameter provenance -----
+        // A hand-entered value is a deliberate user decision: it is tracked as Manual and
+        // Apply will not replace it without an explicit confirmation. Values written by
+        // ApplyCalibration are tracked as Calibrated.
+
+        /// <summary>A public write is a manual edit only when it actually changes the value.</summary>
+        private static OapaParameterSource MarkEdit(float newValue, float currentValue, OapaParameterSource currentSource) {
+            return System.Math.Abs(newValue - currentValue) > 1e-6f ? OapaParameterSource.Manual : currentSource;
+        }
+
+        private static OapaParameterSource ParseSource(string stored) =>
+            Enum.TryParse<OapaParameterSource>(stored, out var source) ? source : OapaParameterSource.Default;
+
+        public OapaParameterSource XGearRatioSource => ParseSource(Properties.Settings.Default.OAPAXGearRatioSource);
+        public OapaParameterSource YGearRatioSource => ParseSource(Properties.Settings.Default.OAPAYGearRatioSource);
+        public OapaParameterSource XBacklashSource => ParseSource(Properties.Settings.Default.OAPAXBacklashSource);
+        public OapaParameterSource YBacklashSource => ParseSource(Properties.Settings.Default.OAPAYBacklashSource);
+
+        // Small provenance hints next to the fields; empty for factory defaults.
+        public string XGearRatioSourceLabel => SourceLabel(XGearRatioSource);
+        public string YGearRatioSourceLabel => SourceLabel(YGearRatioSource);
+        public string YBacklashSourceLabel => SourceLabel(YBacklashSource);
+        private static string SourceLabel(OapaParameterSource source) =>
+            source == OapaParameterSource.Default ? string.Empty : source.ToString().ToLowerInvariant();
+
+        /// <summary>Factor bounds: a value below 1 is meaningless, above this it is a typo.</summary>
+        private const float MinimumFactor = 1f;
+        private const float MaximumFactor = 100000f;
+        /// <summary>Backlash beyond 1.5 degrees is physically absurd and would command huge compensation moves.</summary>
+        private const float MaximumBacklashArcmin = 90f;
 
         /// <summary>
         /// Safety ceiling for the per-cycle correction. Sole owner of the persisted
@@ -409,6 +461,11 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
         [NotifyCanExecuteChangedFor(nameof(ApplyCalibrationCommand))]
         private bool calibrationSlippageDetected;
 
+        // Armed by the first Apply when manual values would be replaced; the second Apply
+        // confirms. Disarmed by Discard and by starting a new calibration.
+        [ObservableProperty]
+        private bool applyConfirmationPending;
+
         public bool CanApplyCalibration() => HasCalibrationResult && !CalibrationSlippageDetected;
 
         public bool CanCalibrate() => Connected && IsNotMoving && !CalibrationRunning && CameraIsFree();
@@ -450,6 +507,7 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
                         CalibrationRunning = true;
                         HasCalibrationResult = false;
                         CalibrationSlippageDetected = false;
+                        ApplyConfirmationPending = false;
                         CalibrationStatus = "Starting calibration...";
                         CalibrationConsistencyMessage = string.Empty;
                     });
@@ -529,10 +587,25 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
         [RelayCommand(CanExecute = nameof(CanApplyCalibration))]
         public void ApplyCalibration() {
             try {
-                XGearRatio = DiscoveredXRatio;
-                YGearRatio = DiscoveredYRatio;
-                XBacklashCompensation = DiscoveredXBacklash;
-                YBacklashCompensation = DiscoveredYBacklash;
+                // Manual values are deliberate user decisions: name them and require a
+                // second Apply instead of overwriting silently.
+                var manual = new List<string>();
+                if (XGearRatioSource == OapaParameterSource.Manual) { manual.Add($"X factor {XGearRatio:F1} -> {DiscoveredXRatio:F1}"); }
+                if (YGearRatioSource == OapaParameterSource.Manual) { manual.Add($"Y factor {YGearRatio:F1} -> {DiscoveredYRatio:F1}"); }
+                if (XBacklashSource == OapaParameterSource.Manual) { manual.Add($"X backlash {XBacklashCompensation:F1}' -> {DiscoveredXBacklash:F1}'"); }
+                if (YBacklashSource == OapaParameterSource.Manual) { manual.Add($"Y backlash {YBacklashCompensation:F1}' -> {DiscoveredYBacklash:F1}'"); }
+                if (manual.Count > 0 && !ApplyConfirmationPending) {
+                    ApplyConfirmationPending = true;
+                    CalibrationStatus = $"These values were set manually and would be replaced: {string.Join("; ", manual)}. Press Apply again to confirm.";
+                    Logger.Info($"OAPA calibration apply awaiting confirmation over manual values: {string.Join("; ", manual)}");
+                    return;
+                }
+                ApplyConfirmationPending = false;
+
+                SetXGearRatio(DiscoveredXRatio, OapaParameterSource.Calibrated);
+                SetYGearRatio(DiscoveredYRatio, OapaParameterSource.Calibrated);
+                SetXBacklash(DiscoveredXBacklash, OapaParameterSource.Calibrated);
+                SetYBacklash(DiscoveredYBacklash, OapaParameterSource.Calibrated);
                 // Applying the calibration includes picking the backlash strategy the
                 // measurements call for; the change is stated explicitly, never silent.
                 XBacklashMode = BacklashModePlanner.Recommend(DiscoveredXBacklash, DiscoveredXNoise);
@@ -554,6 +627,7 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
             DiscoveredXBacklash = 0;
             DiscoveredYBacklash = 0;
             HasCalibrationResult = false;
+            ApplyConfirmationPending = false;
             CalibrationConsistencyMessage = string.Empty;
             CalibrationStatus = "Discarded";
         }

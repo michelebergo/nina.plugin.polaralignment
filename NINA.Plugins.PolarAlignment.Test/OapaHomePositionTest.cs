@@ -45,6 +45,11 @@ namespace NINA.Plugins.PolarAlignment.Test {
             vm.upa = system;
             vm.XGearRatio = xRatio;
             vm.YGearRatio = yRatio;
+            // Arranged values are test fixtures, not manual user edits: keep Apply single-step.
+            Properties.Settings.Default.OAPAXGearRatioSource = "Default";
+            Properties.Settings.Default.OAPAYGearRatioSource = "Default";
+            Properties.Settings.Default.OAPAXBacklashSource = "Default";
+            Properties.Settings.Default.OAPAYBacklashSource = "Default";
             return (vm, system);
         }
 
