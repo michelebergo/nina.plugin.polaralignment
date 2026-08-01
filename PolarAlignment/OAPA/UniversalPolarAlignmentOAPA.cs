@@ -81,7 +81,8 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
         private void SendDriverCommand(string command, string what) {
             try {
                 Port.WriteLine(command);
-                Port.ReadLine();
+                var response = Port.ReadLine();
+                Logger.Info($"Driver config: {what} -> {command} (response: {response?.Trim()})");
             } catch (Exception ex) {
                 Logger.Error($"Failed to {what} ({command}): {ex.Message}");
             }
