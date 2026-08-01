@@ -1,3 +1,4 @@
+using System;
 using System.Globalization;
 using FluentAssertions;
 using NINA.Plugins.PolarAlignment.OAPA;
@@ -18,15 +19,20 @@ namespace NINA.Plugins.PolarAlignment.Test {
     /// </summary>
     public class OapaFirmwareWireContractTest {
 
-        private enum Handler { Status, Homing, Jog, DirectMove, DriverConfig, Ignored, Error }
+        private enum Handler { Status, Stop, Homing, Jog, DirectMove, DriverConfig, Ignored, Error }
 
         /// <summary>Faithful port of the routing logic in firmware/oapa.ino (dispatchCommand).</summary>
         private static class FirmwareDispatcher {
+
+            public const float DefaultMaxSpeed = 2000;
+            public const float JogSpeedMin = 50;
+            public const float JogSpeedMax = 3000;
 
             public static Handler Route(string input) {
                 input = input.Trim();
                 if (input.Length == 0) return Handler.Ignored;
                 if (input[0] == '?') return Handler.Status;
+                if (input[0] == '!') return Handler.Stop;
                 if (input.StartsWith("$H")) return Handler.Homing;
                 if (input.StartsWith("$J=")) {
                     // handleJog: anything without G91/G53 is acknowledged but moves nothing.
@@ -53,6 +59,12 @@ namespace NINA.Plugins.PolarAlignment.Test {
                 var digits = input.Substring(2);
                 int.TryParse(digits, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value);
                 return (axis, value);
+            }
+
+            /// <summary>Port of jogSpeedFrom (1.2.1): F sets the max speed of that jog, clamped.</summary>
+            public static float JogSpeedFrom(string spec) {
+                if (!TryReadAxisValue(spec, 'F', out var feed) || feed <= 0) return DefaultMaxSpeed;
+                return Math.Clamp(feed, JogSpeedMin, JogSpeedMax);
             }
 
             /// <summary>Port of readAxisValue: signed decimal following the axis letter.</summary>
@@ -127,6 +139,29 @@ namespace NINA.Plugins.PolarAlignment.Test {
             foreach (var command in OapaDriverCommands.StartupBatch(600, 50, 700, 40)) {
                 FirmwareDispatcher.Route(command).Should().Be(Handler.DriverConfig, because: $"'{command}' is pushed on connect and must not be silently ignored");
             }
+        }
+
+        [Test]
+        public void StopCommand_IsRecognized() {
+            FirmwareDispatcher.Route("!").Should().Be(Handler.Stop);
+        }
+
+        [Test]
+        public void JogSpeed_UsesTheFeedValue_AsSentByTheMoveMethods() {
+            FirmwareDispatcher.JogSpeedFrom("G91G21X100F1000").Should().Be(1000f);
+            FirmwareDispatcher.JogSpeedFrom("G53Y400F100").Should().Be(100f);
+        }
+
+        [Test]
+        public void JogSpeed_IsClampedToSafeStepRates() {
+            FirmwareDispatcher.JogSpeedFrom("G91G21X100F10").Should().Be(FirmwareDispatcher.JogSpeedMin);
+            FirmwareDispatcher.JogSpeedFrom("G91G21X100F999999").Should().Be(FirmwareDispatcher.JogSpeedMax);
+        }
+
+        [Test]
+        public void JogSpeed_FallsBackToDefault_WhenFeedAbsentOrInvalid() {
+            FirmwareDispatcher.JogSpeedFrom("G91G21X100").Should().Be(FirmwareDispatcher.DefaultMaxSpeed);
+            FirmwareDispatcher.JogSpeedFrom("G91G21X100F0").Should().Be(FirmwareDispatcher.DefaultMaxSpeed);
         }
 
         // --- Regression: the historical axis-first grammar is a silent no-op --------

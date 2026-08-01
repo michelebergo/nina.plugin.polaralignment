@@ -266,6 +266,16 @@
             </GroupBox>
         </Grid>
 
+        <!-- Emergency stop - deliberately outside the manual-controls grid so it stays
+             enabled while automated adjustments (or a wrong manual target) are driving
+             the motors. Visible whenever connected. -->
+        <Button Height="30" Margin="0,5,0,0" FontWeight="Bold"
+                Command="{Binding StopMotionCommand}"
+                Visibility="{Binding Connected, Converter={StaticResource BooleanToVisibilityConverter}}"
+                ToolTip="Immediately decelerate both axes to a stop (requires firmware 1.2.1 or newer)">
+            ■ STOP
+        </Button>
+
         <!-- Home Position - Only Visible When Connected -->
         <GroupBox Header="Home Position"
                   Margin="0,5,0,0"

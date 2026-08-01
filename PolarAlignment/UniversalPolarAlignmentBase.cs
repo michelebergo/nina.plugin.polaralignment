@@ -147,6 +147,26 @@ namespace NINA.Plugins.PolarAlignment {
 
         private SemaphoreSlim semaphore = new SemaphoreSlim(1, 1);
 
+        // Serializes individual wire transactions (one command line + its reply). The
+        // semaphore above serializes whole moves; this finer lock lets an out-of-band
+        // command (the OAPA stop) be injected between the status polls of a move in
+        // progress without corrupting the request/reply pairing on the port.
+        private readonly object wireLock = new object();
+
+        protected string ExecuteWireCommand(string command) {
+            lock (wireLock) {
+                port.WriteLine(command);
+                return port.ReadLine();
+            }
+        }
+
+        // Stop support is opt-in per system so legacy controllers keep their exact
+        // historical behavior. A system that overrides RequestStop must halt motion in
+        // a way that keeps reported positions truthful.
+        public virtual bool SupportsStop => false;
+
+        public virtual void RequestStop() { }
+
         public async Task MoveRelative(Axis axis, int speed, float position, CancellationToken token) {
             await semaphore.WaitAsync(token);
             try {
@@ -182,40 +202,58 @@ namespace NINA.Plugins.PolarAlignment {
 
                 var command = $"$J=G91G21{axisCommand}{commandedSteps.ToString(CultureInfo.InvariantCulture)}F{speed.ToString(CultureInfo.InvariantCulture)}";
                 Logger.Info($"Sending command: {command}");
-                port.WriteLine(command);
-                var ok = port.ReadLine();
+                var ok = ExecuteWireCommand(command);
                 Logger.Info($"Response: {ok}");
 
-                var startPos = checkProperty();
-                var timeout = CalculateMovementTimeout(startPos, target, speed);
-                var completionTol = CompletionToleranceSteps(gearRatio);
-                var stuckTol = StuckDeltaSteps(gearRatio);
-                var startTime = DateTime.Now;
-                var lastPos = startPos;
-                var stuckCount = 0;
-
-                while (Math.Abs(checkProperty() - target) > completionTol) {
-                    UpdateStatus();
-                    var currentPos = checkProperty();
-
-                    if (Math.Abs(currentPos - lastPos) < stuckTol) {
-                        stuckCount++;
-                        if (stuckCount > 5) {
-                            throw new TimeoutException($"Motor appears stuck at position {currentPos}. Target was {target}. Check hardware and endstops.");
-                        }
-                    } else {
-                        stuckCount = 0;
-                    }
-                    lastPos = currentPos;
-
-                    if (DateTime.Now - startTime > timeout) {
-                        throw new TimeoutException($"Movement timeout after {timeout.TotalSeconds:N1}s. Current: {currentPos}, Target: {target}");
-                    }
-
-                    await Task.Delay(300, token);
-                }
+                await WaitForMoveCompletion(checkProperty, target, speed, gearRatio, token);
             } finally {
                 semaphore.Release();
+            }
+        }
+
+        private async Task WaitForMoveCompletion(Func<float> checkProperty, float target, int speed, float gearRatio, CancellationToken token) {
+            var startPos = checkProperty();
+            var timeout = CalculateMovementTimeout(startPos, target, speed);
+            var completionTol = CompletionToleranceSteps(gearRatio);
+            var stuckTol = StuckDeltaSteps(gearRatio);
+            var startTime = DateTime.Now;
+            var lastPos = startPos;
+            var stuckCount = 0;
+            var idlePolls = 0;
+
+            while (Math.Abs(checkProperty() - target) > completionTol) {
+                UpdateStatus();
+                var currentPos = checkProperty();
+
+                // Stop-capable systems report Idle once motion has been halted (the
+                // decelerating tail still reports Run). Two consecutive Idle polls short
+                // of the target mean the move was ended externally — exit gracefully
+                // instead of aging into the stuck/timeout exceptions below.
+                if (SupportsStop && Status == "Idle") {
+                    idlePolls++;
+                    if (idlePolls >= 2) {
+                        Logger.Info($"Move ended before reaching target (stopped): position {currentPos}, target was {target}");
+                        return;
+                    }
+                } else {
+                    idlePolls = 0;
+                }
+
+                if (Math.Abs(currentPos - lastPos) < stuckTol) {
+                    stuckCount++;
+                    if (stuckCount > 5) {
+                        throw new TimeoutException($"Motor appears stuck at position {currentPos}. Target was {target}. Check hardware and endstops.");
+                    }
+                } else {
+                    stuckCount = 0;
+                }
+                lastPos = currentPos;
+
+                if (DateTime.Now - startTime > timeout) {
+                    throw new TimeoutException($"Movement timeout after {timeout.TotalSeconds:N1}s. Current: {currentPos}, Target: {target}");
+                }
+
+                await Task.Delay(300, token);
             }
         }
 
@@ -247,8 +285,7 @@ namespace NINA.Plugins.PolarAlignment {
 
                 var command = $"$J=G53{axisCommand}{rawTarget.ToString(CultureInfo.InvariantCulture)}F{speed.ToString(CultureInfo.InvariantCulture)}";
                 Logger.Info($"Sending command: {command}");
-                port.WriteLine(command);
-                var ok = port.ReadLine();
+                var ok = ExecuteWireCommand(command);
                 Logger.Info($"Response: {ok}");
 
                 Func<float> checkProperty = axis switch {
@@ -258,34 +295,7 @@ namespace NINA.Plugins.PolarAlignment {
                     _ => throw new ArgumentException("Invalid Axis"),
                 };
 
-                var startPos = checkProperty();
-                var timeout = CalculateMovementTimeout(startPos, target, speed);
-                var completionTol = CompletionToleranceSteps(gearRatio);
-                var stuckTol = StuckDeltaSteps(gearRatio);
-                var startTime = DateTime.Now;
-                var lastPos = startPos;
-                var stuckCount = 0;
-
-                while (Math.Abs(checkProperty() - target) > completionTol) {
-                    UpdateStatus();
-                    var currentPos = checkProperty();
-
-                    if (Math.Abs(currentPos - lastPos) < stuckTol) {
-                        stuckCount++;
-                        if (stuckCount > 5) {
-                            throw new TimeoutException($"Motor appears stuck at position {currentPos}. Target was {target}. Check hardware and endstops.");
-                        }
-                    } else {
-                        stuckCount = 0;
-                    }
-                    lastPos = currentPos;
-
-                    if (DateTime.Now - startTime > timeout) {
-                        throw new TimeoutException($"Movement timeout after {timeout.TotalSeconds:N1}s. Current: {currentPos}, Target: {target}");
-                    }
-
-                    await Task.Delay(300, token);
-                }
+                await WaitForMoveCompletion(checkProperty, target, speed, gearRatio, token);
             } finally {
                 semaphore.Release();
             }
@@ -306,8 +316,11 @@ namespace NINA.Plugins.PolarAlignment {
         }
 
         private void UpdateStatus() {
-            port.WriteLine("?");
-            var status = ReadStatusLine(port);
+            string status;
+            lock (wireLock) {
+                port.WriteLine("?");
+                status = ReadStatusLine(port);
+            }
 
             var match = GetStatusRegex().Match(status);
             if (match.Success) {

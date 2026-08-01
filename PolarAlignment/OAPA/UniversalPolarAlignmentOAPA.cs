@@ -80,11 +80,25 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
 
         private void SendDriverCommand(string command, string what) {
             try {
-                Port.WriteLine(command);
-                var response = Port.ReadLine();
+                var response = ExecuteWireCommand(command);
                 Logger.Info($"Driver config: {what} -> {command} (response: {response?.Trim()})");
             } catch (Exception ex) {
                 Logger.Error($"Failed to {what} ({command}): {ex.Message}");
+            }
+        }
+
+        // "!" decelerates both axes to a halt (firmware 1.2.1+); older firmware
+        // replies a single "error" line and ignores it, so sending is always safe. The wire lock lets
+        // this land between the status polls of a move in progress; the move's wait
+        // loop then sees Idle short of target and exits gracefully.
+        public override bool SupportsStop => true;
+
+        public override void RequestStop() {
+            try {
+                var response = ExecuteWireCommand("!");
+                Logger.Info($"Stop requested (response: {response?.Trim()})");
+            } catch (Exception ex) {
+                Logger.Error($"Failed to request stop: {ex.Message}");
             }
         }
 

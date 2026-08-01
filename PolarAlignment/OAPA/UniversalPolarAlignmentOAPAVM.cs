@@ -55,6 +55,18 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
             CalibrateGearRatiosCommand.NotifyCanExecuteChanged();
             SetHomeCommand.NotifyCanExecuteChanged();
             GoHomeCommand.NotifyCanExecuteChanged();
+            StopMotionCommand.NotifyCanExecuteChanged();
+        }
+
+        // Safety control: available whenever connected — including while a move or the
+        // calibration is driving the motors, which is precisely when it is needed.
+        public bool CanStopMotion() => Connected;
+
+        [RelayCommand(CanExecute = nameof(CanStopMotion))]
+        private void StopMotion() {
+            if (upa is UniversalPolarAlignmentOAPA oapa) {
+                oapa.RequestStop();
+            }
         }
 
         protected override string SystemName => "OAPA System";
