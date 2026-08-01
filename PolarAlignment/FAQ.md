@@ -58,6 +58,13 @@ The procedure consists of the following steps:
 * Select **OAPA** as the alignment system in the plugin options, connect, and run the built-in **Self-Calibration** once: it automatically measures your platform's gear response and backlash on the sky
 * After calibration, TPPA drives the platform automatically during the correction phase until the configured tolerance is reached
 
+## My OAPA motor runs rough, vibrates and has no torque. What's wrong?
+
+* Check the coil pairing at the motor connector first: each of the driver's two output pairs must connect to one motor coil. With a continuity tester, the two wires of a coil show a few ohms between them — those two go together on the driver's A pins, the other two on the B pins.
+* Adjacent connector pins belonging to *different* coils produce exactly this symptom (rough, noisy, weak motion), and no run-current setting will fix it. Re-pin the connector with the board powered off — never plug or unplug a stepper under power, that can destroy the driver.
+* Once the wiring is right, set the run current for your motor in the panel (for a typical 1.5 A NEMA 17: run 1000–1200 mA, hold 20–40%). The values are applied live and re-applied automatically on every connection.
+* Don't judge the motor current by the bench power supply readout: the driver is a switching regulator, so the supply current barely changes even when the coil current doubles. Judge by holding torque (turn the shaft by hand at standstill) or motion under load.
+
 ## The mount and camera are both connected, but the automatic-mode button is greyed out. Why?
 
 * Automatic mode requires the mount to move along the right ascension axis through the ASCOM [`MoveAxis`](https://ascom-standards.org/Help/Platform/html/M_ASCOM_DeviceInterface_ITelescopeV3_MoveAxis.htm) method, which is different from a normal slew.

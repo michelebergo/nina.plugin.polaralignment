@@ -27,12 +27,13 @@
         <!-- The guidance every new user otherwise gets by asking: collapsed by default. -->
         <Expander Header="First movement checklist" Margin="0,0,0,5">
             <StackPanel Margin="20,5,5,5">
-                <TextBlock TextWrapping="Wrap" Margin="0,2" Text="1. Connect the controller and check the position readout updates." />
-                <TextBlock TextWrapping="Wrap" Margin="0,2" Text="2. Review speed, run current and hold percent for both axes (defaults suit the reference hardware)." />
-                <TextBlock TextWrapping="Wrap" Margin="0,2" Text="3. With automated adjustments OFF, make a small test nudge (±1') on each axis and confirm the platform physically moves." />
-                <TextBlock TextWrapping="Wrap" Margin="0,2" Text="4. Watch a star or the live view: if an axis moves the wrong way, toggle its Reverse flag in the plugin options (Self-Calibration can also fix this automatically)." />
-                <TextBlock TextWrapping="Wrap" Margin="0,2" Text="5. Run Self-Calibration on a plate-solvable field away from the zenith: it measures the calibration factors, the backlash, and recommends a backlash mode." />
-                <TextBlock TextWrapping="Wrap" Margin="0,2" Text="6. Apply the result, enable 'Adjust for refraction' in the options (recommended), then start the polar alignment with automated adjustments ON." />
+                <TextBlock TextWrapping="Wrap" Margin="0,2" Text="1. Check the motor wiring: each driver output pair must connect to one motor coil (the two wires of a coil show a few ohms between them on a continuity tester). A motor that runs rough, noisy and weak almost always has the coil pairs mixed at the connector - no current setting will fix that." />
+                <TextBlock TextWrapping="Wrap" Margin="0,2" Text="2. Connect the controller and check the position readout updates." />
+                <TextBlock TextWrapping="Wrap" Margin="0,2" Text="3. Review speed, run current and hold percent for both axes (defaults suit the reference hardware; for a typical 1.5 A NEMA 17 try run 1000-1200 mA, hold 20-40%)." />
+                <TextBlock TextWrapping="Wrap" Margin="0,2" Text="4. With automated adjustments OFF, make a small test nudge (±1') on each axis and confirm the platform physically moves. The STOP button halts both axes at any time." />
+                <TextBlock TextWrapping="Wrap" Margin="0,2" Text="5. Watch a star or the live view: if an axis moves the wrong way, toggle its Reverse flag in the plugin options (Self-Calibration can also fix this automatically)." />
+                <TextBlock TextWrapping="Wrap" Margin="0,2" Text="6. Run Self-Calibration on a plate-solvable field away from the zenith: it measures the calibration factors, the backlash, and recommends a backlash mode." />
+                <TextBlock TextWrapping="Wrap" Margin="0,2" Text="7. Apply the result, enable 'Adjust for refraction' in the options (recommended), then start the polar alignment with automated adjustments ON." />
             </StackPanel>
         </Expander>
 
