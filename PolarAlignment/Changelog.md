@@ -5,7 +5,8 @@
 - New **STOP button** in the OAPA panel: decelerates both axes to a halt (firmware `!` command). Deliberately enabled even while automated adjustments or a mistyped manual target are driving the motors. A stopped move ends gracefully instead of raising a stuck/timeout error.
 - **Movement speed is now honored** (firmware 1.2.1): the F feed rate the plugin always sent is applied per jog, clamped to a safe 50-3000 steps/s (previously the firmware ran every move at a fixed 2000 steps/s profile).
 - New firmware-grammar **contract tests**: a C# mirror of the firmware's command dispatcher pins every command shape the plugin emits as recognized - the class of "acknowledged but ignored" wire bugs is now caught at build time.
-- Firmware **1.2.1** (reflash required for the speed and STOP features; the plugin fixes work with 1.2.0 too).
+- Firmware default **hold current lowered to 25%** (was 50%): the hold current flows continuously from power-on - including before the plugin connects and pushes the configured values - and was keeping motors warm at rest.
+- Firmware **1.2.2** (reflash required for the speed, STOP and hold-default changes; the plugin fixes work with 1.2.0 too).
 
 ## Version 2.2.7.0 (beta rc9)
 - OAPA Self-Calibration rewritten as a staged, self-scaling sequence: it measures the solve noise first, escalates its probe until motion is visible, sizes its measuring legs to a fixed physical displacement, and grows the backlash leg until the shortfall is a minority share - so it now survives grossly wrong initial factors and backlash larger than the measuring leg. A hard solve budget bounds the sky excursion.

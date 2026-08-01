@@ -2,7 +2,7 @@
 
 Everything from rc9 (robust self-calibration, slippage detection, backlash modes, parameter protection, precision finish) **plus a bench-testing session's worth of hard fixes**: motor currents that actually reach the driver, a real STOP button, and movement speed that finally does what the field says. **Please don't redistribute firmware or plugin — still in beta.**
 
-> **Firmware updated: 1.2.1 — reflash recommended.** The plugin fixes work with 1.2.0 too, but the STOP button and the movement speed setting need 1.2.1.
+> **Firmware updated: 1.2.2 — reflash recommended.** The plugin fixes work with 1.2.0 too, but the STOP button and the movement speed setting need the new firmware.
 
 ## Why this release exists
 
@@ -33,7 +33,7 @@ If a motor runs **rough, noisy and weak**: check the coil pairing at the connect
 
 ## Firmware
 
-**1.2.1** — flash `firmware/oapa.ino` (Arduino IDE or PlatformIO, same procedure as always: close any serial monitor afterwards or the COM port stays busy). Changes: the jog feed rate is applied per move (was ignored), and the new `!` command stops both axes. Protocol otherwise unchanged; older plugins keep working.
+**1.2.2** — flash `firmware/oapa.ino` (Arduino IDE or PlatformIO, same procedure as always: close any serial monitor afterwards or the COM port stays busy). Changes: the jog feed rate is applied per move (was ignored), the new `!` command stops both axes, and the default **hold current is lowered to 25%** (was 50%) — the hold current flows continuously from power-on, including before the plugin connects, and was keeping motors warm at rest. Protocol otherwise unchanged; older plugins keep working.
 
 ## Install / update
 
