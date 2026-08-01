@@ -60,40 +60,47 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
 
         protected override Regex GetStatusRegex() => StatusRegex();
 
-        public void SetXRunCurrent(int currentMA) {
+        // The firmware only parses the type-first grammar ("CX600", "HY50"); the axis-first
+        // form previously sent here fell into its unknown-command branch and was silently
+        // ignored, leaving the drivers on their 600 mA / 50% firmware defaults.
+        public UniversalPolarAlignmentOAPA() : base() {
+            ApplyStoredDriverConfiguration();
+        }
+
+        // Driver settings are volatile on the controller (lost on power cycle), so the
+        // persisted values are pushed once per connection instead of only on field edits.
+        private void ApplyStoredDriverConfiguration() {
+            var settings = Properties.Settings.Default;
+            foreach (var command in OapaDriverCommands.StartupBatch(
+                settings.OAPAXRunCurrent, settings.OAPAXHoldPercent,
+                settings.OAPAYRunCurrent, settings.OAPAYHoldPercent)) {
+                SendDriverCommand(command, "apply stored driver configuration");
+            }
+        }
+
+        private void SendDriverCommand(string command, string what) {
             try {
-                Port.WriteLine($"XC{currentMA}");
+                Port.WriteLine(command);
                 Port.ReadLine();
             } catch (Exception ex) {
-                Logger.Error($"Failed to set X run current: {ex.Message}");
+                Logger.Error($"Failed to {what} ({command}): {ex.Message}");
             }
+        }
+
+        public void SetXRunCurrent(int currentMA) {
+            SendDriverCommand(OapaDriverCommands.RunCurrent(Axis.XAxis, currentMA), "set X run current");
         }
 
         public void SetYRunCurrent(int currentMA) {
-            try {
-                Port.WriteLine($"YC{currentMA}");
-                Port.ReadLine();
-            } catch (Exception ex) {
-                Logger.Error($"Failed to set Y run current: {ex.Message}");
-            }
+            SendDriverCommand(OapaDriverCommands.RunCurrent(Axis.YAxis, currentMA), "set Y run current");
         }
 
         public void SetXHoldPercent(int percent) {
-            try {
-                Port.WriteLine($"XH{percent}");
-                Port.ReadLine();
-            } catch (Exception ex) {
-                Logger.Error($"Failed to set X hold percent: {ex.Message}");
-            }
+            SendDriverCommand(OapaDriverCommands.HoldPercent(Axis.XAxis, percent), "set X hold percent");
         }
 
         public void SetYHoldPercent(int percent) {
-            try {
-                Port.WriteLine($"YH{percent}");
-                Port.ReadLine();
-            } catch (Exception ex) {
-                Logger.Error($"Failed to set Y hold percent: {ex.Message}");
-            }
+            SendDriverCommand(OapaDriverCommands.HoldPercent(Axis.YAxis, percent), "set Y hold percent");
         }
 
         [GeneratedRegex(@"<(?<status>\w+)\|MPos:(?<x>[+-]?\d+(\.\d+)?),(?<y>[+-]?\d+(\.\d+)?),(?<z>[+-]?\d+(\.\d+)?)(?:\|T:(?<target>[+-]?\d+),R:(?<running>[01]),E:(?<endstop>[01]),S:(?<speed>[+-]?\d+(\.\d+)?))?(?:\|V:(?<version>\d+(?:\.\d+){0,2}))?\|>")]
