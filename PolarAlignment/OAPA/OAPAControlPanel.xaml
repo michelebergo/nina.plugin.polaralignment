@@ -13,6 +13,7 @@
         <s:String x:Key="OAPAGearRatioToolTip">Scale factor used when converting between OAPA motor units and the axis units shown by TPPA.</s:String>
         <s:String x:Key="OAPARunCurrentToolTip">Run-current value, in milliamps, sent to the OAPA controller for this axis.</s:String>
         <s:String x:Key="OAPAHoldPercentToolTip">Hold-current percentage sent to the OAPA controller for this axis.</s:String>
+        <s:String x:Key="OAPAXBacklashToolTip">Azimuth-axis mechanical backlash in arcminutes, measured automatically by the Self-Calibration. Same value as "Azimuth backlash compensation" in the plugin options.</s:String>
         <s:String x:Key="OAPAYBacklashToolTip">Altitude-axis mechanical backlash in arcminutes, measured automatically by the Self-Calibration. Specific to OAPA platforms.</s:String>
         <s:String x:Key="OAPABacklashModeToolTip">How this axis handles its backlash on direction reversals. Off: no compensation (negligible backlash). Soft: single move extended by 75% of the backlash (conservative if the value may be overestimated). Full: single move extended by the whole backlash. Unidirectional: overshoot past the target and return, so the final approach always comes from the same direction (best for large backlash). Applying a calibration sets the recommended mode automatically.</s:String>
     </UserControl.Resources>
@@ -87,8 +88,13 @@
                     <TextBlock Grid.Row="1" Grid.Column="2" VerticalAlignment="Center" Margin="5" ToolTip="{StaticResource OAPAHoldPercentToolTip}">Hold %</TextBlock>
                     <TextBox Grid.Row="1" Grid.Column="3" VerticalAlignment="Center" Margin="5" Text="{Binding XHoldPercent}" ToolTip="{StaticResource OAPAHoldPercentToolTip}" />
 
-                    <TextBlock Grid.Row="2" Grid.Column="0" VerticalAlignment="Center" Margin="5" ToolTip="{StaticResource OAPABacklashModeToolTip}">Backlash mode</TextBlock>
-                    <ComboBox Grid.Row="2" Grid.Column="1" VerticalAlignment="Center" Margin="5" ItemsSource="{Binding BacklashModeNames}" SelectedItem="{Binding XBacklashModeName}" ToolTip="{StaticResource OAPABacklashModeToolTip}" />
+                    <TextBlock Grid.Row="2" Grid.Column="0" VerticalAlignment="Center" Margin="5" ToolTip="{StaticResource OAPAXBacklashToolTip}">Backlash (')</TextBlock>
+                    <DockPanel Grid.Row="2" Grid.Column="1">
+                        <TextBlock DockPanel.Dock="Right" VerticalAlignment="Center" Margin="2,0,5,0" Opacity="0.6" FontSize="10" Text="{Binding XBacklashSourceLabel}" />
+                        <TextBox VerticalAlignment="Center" Margin="5" Text="{Binding XBacklashCompensation}" ToolTip="{StaticResource OAPAXBacklashToolTip}" />
+                    </DockPanel>
+                    <TextBlock Grid.Row="2" Grid.Column="2" VerticalAlignment="Center" Margin="5" ToolTip="{StaticResource OAPABacklashModeToolTip}">Backlash mode</TextBlock>
+                    <ComboBox Grid.Row="2" Grid.Column="3" VerticalAlignment="Center" Margin="5" ItemsSource="{Binding BacklashModeNames}" SelectedItem="{Binding XBacklashModeName}" ToolTip="{StaticResource OAPABacklashModeToolTip}" />
                 </Grid>
             </GroupBox>
 

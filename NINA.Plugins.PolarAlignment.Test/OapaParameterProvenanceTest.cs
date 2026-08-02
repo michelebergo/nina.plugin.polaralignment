@@ -65,6 +65,18 @@ namespace NINA.Plugins.PolarAlignment.Test {
         }
 
         [Test]
+        public void BacklashSourceLabels_ExistForBothAxes_AndReflectManualEdits() {
+            var vm = Vm();
+
+            // Empty for factory defaults, like every other provenance hint.
+            vm.XBacklashSourceLabel.Should().BeEmpty();
+            vm.YBacklashSourceLabel.Should().BeEmpty();
+
+            vm.XBacklashCompensation = vm.XBacklashCompensation + 2f;
+            vm.XBacklashSourceLabel.Should().Be("manual");
+        }
+
+        [Test]
         public void HandEnteredBacklash_IsClampedToAPhysicalRange() {
             var vm = Vm();
 

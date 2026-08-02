@@ -460,7 +460,7 @@
                             VerticalAlignment="Center"
                             Text="{Binding ActiveSystem.XBacklashCompensation}"
                             ToolTip="{StaticResource AzimuthBacklashCompensationToolTip}"
-                            Unit="steps"
+                            Unit="arcmin"
                             Visibility="{Binding IsSystemSelected, Converter={StaticResource BooleanToVisibilityConverter}}" />
                         <TextBlock
                             Grid.Row="22"

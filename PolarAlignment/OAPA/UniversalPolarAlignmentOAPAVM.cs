@@ -175,6 +175,7 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
             CoreUtil.SaveSettings(Properties.Settings.Default);
             RaisePropertyChanged(nameof(XBacklashCompensation));
             RaisePropertyChanged(nameof(XBacklashSource));
+            RaisePropertyChanged(nameof(XBacklashSourceLabel));
         }
 
         // OAPA-specific: the altitude axis of an OAPA platform also has measurable backlash.
@@ -215,6 +216,7 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
         // Small provenance hints next to the fields; empty for factory defaults.
         public string XGearRatioSourceLabel => SourceLabel(XGearRatioSource);
         public string YGearRatioSourceLabel => SourceLabel(YGearRatioSource);
+        public string XBacklashSourceLabel => SourceLabel(XBacklashSource);
         public string YBacklashSourceLabel => SourceLabel(YBacklashSource);
         private static string SourceLabel(OapaParameterSource source) =>
             source == OapaParameterSource.Default ? string.Empty : source.ToString().ToLowerInvariant();
