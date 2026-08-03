@@ -10,7 +10,7 @@ using System.Threading.Tasks;
 
 namespace NINA.Plugins.PolarAlignment {
     public abstract partial class UniversalPolarAlignmentBase : IPolarAlignmentSystem {
-        private readonly SerialPort port;
+        private readonly ISerialLink port;
 
         protected abstract string SystemName { get; }
         protected virtual string NewLineSequence => "\n";
@@ -40,13 +40,19 @@ namespace NINA.Plugins.PolarAlignment {
 
         protected abstract Regex GetStatusRegex();
 
-        protected SerialPort Port => port;
-
         private const float TargetPositionTolerance = 0.01f;
         private const double MovementTimeoutFactor = 2d;
         private static readonly TimeSpan MinimumMovementTimeout = TimeSpan.FromSeconds(5);
         private static readonly TimeSpan MovementTimeoutGracePeriod = TimeSpan.FromSeconds(5);
         private static readonly TimeSpan FallbackMovementTimeout = TimeSpan.FromSeconds(30);
+
+        // Wire-injection constructor: skips the COM scan entirely and talks to the given
+        // link. This is the test seam - production always goes through the scanning
+        // constructor below. Runs the same initial status probe as a real connect.
+        protected UniversalPolarAlignmentBase(ISerialLink link) {
+            port = link ?? throw new ArgumentNullException(nameof(link));
+            UpdateStatus();
+        }
 
         protected UniversalPolarAlignmentBase() {
             var allPorts = SerialPort.GetPortNames();
@@ -77,14 +83,15 @@ namespace NINA.Plugins.PolarAlignment {
                             try { serialPortToTest.DiscardInBuffer(); } catch { }
                         }
 
+                        var link = new SerialPortLink(serialPortToTest);
                         var matched = false;
                         for (var attempt = 0; attempt <= ConnectRetryAttempts && !matched; attempt++) {
                             try {
                                 serialPortToTest.WriteLine("?");
-                                var status = ReadStatusLine(serialPortToTest);
+                                var status = ReadStatusLine(link);
                                 var match = GetStatusRegex().Match(status);
                                 if (match.Success) {
-                                    port = serialPortToTest;
+                                    port = link;
                                     Logger.Info($"Found {SystemName} on {comPort}");
                                     OnPortMatched(comPort);
                                     matched = true;
@@ -366,7 +373,7 @@ namespace NINA.Plugins.PolarAlignment {
             return version.Contains('.') ? version : version + ".0";
         }
 
-        private static string ReadStatusLine(SerialPort serialPort) {
+        private static string ReadStatusLine(ISerialLink serialPort) {
             var status = serialPort.ReadLine();
             if (string.IsNullOrWhiteSpace(status) ||
                 string.Equals(status.Trim(), "ok", StringComparison.OrdinalIgnoreCase)) {

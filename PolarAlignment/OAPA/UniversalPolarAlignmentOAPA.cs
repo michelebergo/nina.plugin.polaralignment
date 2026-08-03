@@ -67,6 +67,12 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
             ApplyStoredDriverConfiguration();
         }
 
+        // Wire-injection constructor for tests: same post-connect behavior as production
+        // (status probe in the base, then the driver-configuration push), no COM scan.
+        protected UniversalPolarAlignmentOAPA(ISerialLink link) : base(link) {
+            ApplyStoredDriverConfiguration();
+        }
+
         // Driver settings are volatile on the controller (lost on power cycle), so the
         // persisted values are pushed once per connection instead of only on field edits.
         private void ApplyStoredDriverConfiguration() {
