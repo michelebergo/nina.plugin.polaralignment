@@ -18,13 +18,23 @@ namespace NINA.Plugins.PolarAlignment.Test {
     /// </summary>
     public class OapaFirmwareSourceTest {
 
+        /// <summary>
+        /// The firmware source is the beta line's working copy; its canonical home is the
+        /// separate oapa-firmware repository, so a checkout without it is legitimate (an
+        /// upstream PR branch, for one). The guard applies wherever the file exists - which
+        /// includes every machine a release is ever packaged from.
+        /// </summary>
         private static string FirmwarePath() {
             var dir = new DirectoryInfo(AppContext.BaseDirectory);
             while (dir != null && !File.Exists(Path.Combine(dir.FullName, "PolarAlignment", "NINA.Plugins.PolarAlignment.csproj"))) {
                 dir = dir.Parent;
             }
             dir.Should().NotBeNull("the test must run inside the repository tree");
-            return Path.Combine(dir.FullName, "firmware", "oapa.ino");
+            var path = Path.Combine(dir.FullName, "firmware", "oapa.ino");
+            if (!File.Exists(path)) {
+                Assert.Ignore("firmware source not present in this checkout");
+            }
+            return path;
         }
 
         [Test]
