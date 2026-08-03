@@ -9,6 +9,7 @@ using NINA.Equipment.Interfaces.Mediator;
 using NINA.PlateSolving.Interfaces;
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
@@ -106,6 +107,7 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
             RaisePropertyChanged(nameof(XGearRatioSource));
             RaisePropertyChanged(nameof(XGearRatioSourceLabel));
             RaisePropertyChanged(nameof(PositionX));
+            RaisePropertyChanged(nameof(XSpeedPhysical));
             RefreshHomeDisplay();
         }
 
@@ -115,7 +117,23 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
                 Properties.Settings.Default.OAPAXSpeed = value;
                 CoreUtil.SaveSettings(Properties.Settings.Default);
                 RaisePropertyChanged();
+                RaisePropertyChanged(nameof(XSpeedPhysical));
             }
+        }
+
+        // The speed sent to the controller is a step rate, so the same number is a
+        // different sky speed on each axis. Once a calibration factor exists the rate can
+        // be stated in the unit the user actually thinks in.
+        public string XSpeedPhysical => PhysicalSpeed(XSpeed, XGearRatio);
+
+        public string YSpeedPhysical => PhysicalSpeed(YSpeed, YGearRatio);
+
+        private static string PhysicalSpeed(int stepsPerSecond, float stepsPerArcmin) {
+            // A factor of 1 is the factory default: the platform has never been calibrated,
+            // and inventing a reading from it would be worse than showing none.
+            if (stepsPerArcmin <= 1f) { return string.Empty; }
+            var arcminPerSecond = stepsPerSecond / stepsPerArcmin;
+            return $"~ {arcminPerSecond.ToString("F1", CultureInfo.InvariantCulture)} '/s";
         }
 
         public override float YGearRatio {
@@ -133,6 +151,7 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
             RaisePropertyChanged(nameof(YGearRatioSource));
             RaisePropertyChanged(nameof(YGearRatioSourceLabel));
             RaisePropertyChanged(nameof(PositionY));
+            RaisePropertyChanged(nameof(YSpeedPhysical));
             RefreshHomeDisplay();
         }
 
@@ -142,6 +161,7 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
                 Properties.Settings.Default.OAPAYSpeed = value;
                 CoreUtil.SaveSettings(Properties.Settings.Default);
                 RaisePropertyChanged();
+                RaisePropertyChanged(nameof(YSpeedPhysical));
             }
         }
 
@@ -478,7 +498,14 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
         // Armed by the first Apply when manual values would be replaced; the second Apply
         // confirms. Disarmed by Discard and by starting a new calibration.
         [ObservableProperty]
+        [NotifyPropertyChangedFor(nameof(ApplyButtonText))]
         private bool applyConfirmationPending;
+
+        /// <summary>
+        /// The button states the request itself while a confirmation is armed: leaving it
+        /// in the status line alone reads as "nothing happened" and costs a calibration.
+        /// </summary>
+        public string ApplyButtonText => ApplyConfirmationPending ? "Apply again to confirm" : "Apply";
 
         public bool CanApplyCalibration() => HasCalibrationResult && !CalibrationSlippageDetected;
 

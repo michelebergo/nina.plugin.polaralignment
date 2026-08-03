@@ -450,7 +450,7 @@
                             VerticalAlignment="Center"
                             Text="Azimuth backlash compensation"
                             ToolTip="{StaticResource AzimuthBacklashCompensationToolTip}"
-                            Visibility="{Binding IsSystemSelected, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                            Visibility="{Binding IsUPASSelected, Converter={StaticResource BooleanToVisibilityConverter}}" />
                         <ninactrl:UnitTextBox
                             Grid.Row="21"
                             Grid.Column="1"
@@ -461,7 +461,7 @@
                             Text="{Binding ActiveSystem.XBacklashCompensation}"
                             ToolTip="{StaticResource AzimuthBacklashCompensationToolTip}"
                             Unit="arcmin"
-                            Visibility="{Binding IsSystemSelected, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                            Visibility="{Binding IsUPASSelected, Converter={StaticResource BooleanToVisibilityConverter}}" />
                         <TextBlock
                             Grid.Row="22"
                             Margin="0,5,0,0"

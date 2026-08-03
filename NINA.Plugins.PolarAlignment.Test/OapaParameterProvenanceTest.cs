@@ -32,7 +32,13 @@ namespace NINA.Plugins.PolarAlignment.Test {
         }
 
         private static UniversalPolarAlignmentOAPAVM Vm() {
-            // The provenance settings are static; every test starts from a known state.
+            // The settings are static, and a value is only marked Manual when it actually
+            // changes - so a test inheriting the previous test's numbers would silently
+            // stop arming the confirmation. Reset the values as well as their provenance.
+            Properties.Settings.Default.OAPAXGearRatio = 1f;
+            Properties.Settings.Default.OAPAYGearRatio = 1f;
+            Properties.Settings.Default.OAPAXBacklashCompensation = 0f;
+            Properties.Settings.Default.OAPAYBacklashCompensation = 0f;
             Properties.Settings.Default.OAPAXGearRatioSource = "Default";
             Properties.Settings.Default.OAPAYGearRatioSource = "Default";
             Properties.Settings.Default.OAPAXBacklashSource = "Default";
@@ -146,6 +152,23 @@ namespace NINA.Plugins.PolarAlignment.Test {
             vm.XGearRatio.Should().Be(400f);
             vm.XGearRatioSource.Should().Be(OapaParameterSource.Calibrated);
             vm.CalibrationStatus.Should().Contain("Applied");
+        }
+
+        [Test]
+        public void ApplyButton_SaysWhatItWants_WhileTheConfirmationIsArmed() {
+            // A tester lost a good calibration to this: the request for a second press
+            // lived only in the status line, so "nothing happened" was the natural reading.
+            var vm = Vm();
+            vm.ApplyButtonText.Should().Be("Apply");
+
+            vm.YBacklashCompensation = 5f;   // manual
+            PrepareResult(vm);
+            vm.ApplyCalibration();
+
+            vm.ApplyButtonText.Should().Be("Apply again to confirm");
+
+            vm.DiscardCalibration();
+            vm.ApplyButtonText.Should().Be("Apply");
         }
 
         [Test]

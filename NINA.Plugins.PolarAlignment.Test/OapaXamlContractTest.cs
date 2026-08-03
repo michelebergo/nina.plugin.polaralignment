@@ -88,6 +88,21 @@ namespace NINA.Plugins.PolarAlignment.Test {
         }
 
         [Test]
+        public void AzimuthBacklashOption_IsShownOnlyForSystemsWithoutTheirOwnPanel() {
+            // The value is one setting with two views, which reads as a duplicate to OAPA
+            // users now that the motor panel owns it. UPAS has no motor panel, so the
+            // options row stays for it - and only for it.
+            var options = XDocument.Parse(File.ReadAllText(RepoFile("Options.xaml")));
+            var azBacklashRow = options.Descendants()
+                .Where(e => ((string)e.Attribute("ToolTip")) == "{StaticResource AzimuthBacklashCompensationToolTip}")
+                .ToList();
+
+            azBacklashRow.Should().NotBeEmpty("the options page must still expose the azimuth backlash for UPAS");
+            azBacklashRow.Should().OnlyContain(e => ((string)e.Attribute("Visibility")).Contains("IsUPASSelected"),
+                "with OAPA selected the value belongs in the motor panel only");
+        }
+
+        [Test]
         public void AzimuthBacklashOption_IsLabeledInArcminutes() {
             var options = XDocument.Parse(File.ReadAllText(RepoFile("Options.xaml")));
             var azBacklashBox = options.Descendants()
