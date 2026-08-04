@@ -26,11 +26,20 @@ Files are classified by whether they collide with the two PRs awaiting review:
 | --- | --- |
 | `PolarAlignment/OAPA/OAPAControlPanel.xaml` | contested — #16 rewrites it |
 | `PolarAlignment/OAPA/UniversalPolarAlignmentOAPAVM.cs` | contested — #16 and #17 both touch it |
+| `PolarAlignment/PolarAlignmentPlugin.cs` | contested — #16 and #17 both touch it |
 | `PolarAlignment/OAPA/UniversalPolarAlignmentOAPA.cs` | free |
 | `PolarAlignment/FAQ.md` | free |
 | `PolarAlignment/OAPA/AlignmentErrorMonitor.cs` | new file |
+| `PolarAlignment/OAPA/OapaParameterSummary.cs` | new file |
 | `NINA.Plugins.PolarAlignment.Test/AlignmentErrorMonitorTest.cs` | new file |
+| `NINA.Plugins.PolarAlignment.Test/OapaParameterSummaryTest.cs` | new file |
 | `NINA.Plugins.PolarAlignment.Test/OapaXamlContractTest.cs` | free |
+
+`PolarAlignmentPlugin.cs` is unavoidable: it is the only construction site of the OAPA
+view model, so it is the only place the message broker can be injected from. The
+broker parameter on the view-model constructor is optional with a `null` default, which
+keeps the seventeen existing five-argument call sites — five of them in files belonging
+to PR #16 and #17 — untouched.
 
 **Must not be modified by rc13:**
 
