@@ -82,6 +82,16 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
                 settings.OAPAYRunCurrent, settings.OAPAYHoldPercent)) {
                 SendDriverCommand(command, "apply stored driver configuration");
             }
+
+            // The motion parameters are not driver commands, so nothing else records them.
+            // Logging them here makes a support log self-sufficient: the $J= step counts
+            // that follow can be read back as arcminutes without guessing the ratio.
+            Logger.Info(OapaParameterSummary.ForAxis("X (Azimuth)",
+                settings.OAPAXGearRatio, settings.OAPAXBacklashCompensation,
+                settings.OAPAXBacklashMode, settings.OAPAXSpeed));
+            Logger.Info(OapaParameterSummary.ForAxis("Y (Altitude)",
+                settings.OAPAYGearRatio, settings.OAPAYBacklashCompensation,
+                settings.OAPAYBacklashMode, settings.OAPAYSpeed));
         }
 
         private void SendDriverCommand(string command, string what) {

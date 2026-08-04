@@ -114,6 +114,12 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
         public override bool DoAutomatedAdjustments {
             get => Properties.Settings.Default.DoAutomatedAdjustments;
             set {
+                // The instruction header records this once at start and never revisits it,
+                // while the correction loop reads it live every cycle. A tester enabling
+                // adjustments mid-run produced a log that appeared to contradict itself.
+                if (Properties.Settings.Default.DoAutomatedAdjustments != value) {
+                    Logger.Info($"OAPA automated adjustments {(value ? "enabled" : "disabled")}");
+                }
                 Properties.Settings.Default.DoAutomatedAdjustments = value;
                 CoreUtil.SaveSettings(Properties.Settings.Default);
                 RaisePropertyChanged();
