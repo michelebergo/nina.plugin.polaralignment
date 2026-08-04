@@ -200,9 +200,18 @@ namespace NINA.Plugins.PolarAlignment.Test {
     /// </summary>
     public class OapaErrorReadoutTest {
 
+        // The VM's ErrorMonitor is built with startHeartbeat: true (the production default).
+        // Any test that delivers a message starts a live 10-second timer; without disposing
+        // it here, a test run would leak one per such test. See AlignmentErrorMonitorTest's
+        // Heartbeat_DoesNotRunUntilTheFirstMessageArrives for why the timer starts lazily.
+        private UniversalPolarAlignmentOAPAVM vm;
+
+        [TearDown]
+        public void TearDown() => vm?.ErrorMonitor.Dispose();
+
         [Test]
         public void WithNoMeasurement_AllThreeReadEmDash() {
-            var vm = new UniversalPolarAlignmentOAPAVM(null, null, null, null, null);
+            vm = new UniversalPolarAlignmentOAPAVM(null, null, null, null, null);
 
             vm.AzimuthErrorDisplay.Should().Be("—");
             vm.AltitudeErrorDisplay.Should().Be("—");
@@ -211,15 +220,14 @@ namespace NINA.Plugins.PolarAlignment.Test {
 
         [Test]
         public async Task AfterAMeasurement_ValuesAreFormattedInArcminutesWithSign() {
-            var vm = new UniversalPolarAlignmentOAPAVM(null, null, null, null, null);
+            vm = new UniversalPolarAlignmentOAPAVM(null, null, null, null, null);
 
             await vm.ErrorMonitor.OnMessageReceived(new FakeMessage {
                 Topic = AlignmentErrorMonitor.ErrorTopic,
                 Content = new { AzimuthError = 0.25, AltitudeError = -0.1, TotalError = 0.269 }
             });
 
-            // Sign matters: it tells the user which way to nudge, which is the whole point
-            // of putting the numbers next to the buttons.
+            // Sign matters: it lets the same axis's readings be compared nudge to nudge.
             vm.AzimuthErrorDisplay.Should().Be("+15.00'");
             vm.AltitudeErrorDisplay.Should().Be("-6.00'");
             vm.TotalErrorDisplay.Should().Be("16.14'");
@@ -227,7 +235,7 @@ namespace NINA.Plugins.PolarAlignment.Test {
 
         [Test]
         public async Task AMeasurement_RaisesPropertyChangedForTheThreeDisplays() {
-            var vm = new UniversalPolarAlignmentOAPAVM(null, null, null, null, null);
+            vm = new UniversalPolarAlignmentOAPAVM(null, null, null, null, null);
             var changed = new List<string>();
             vm.PropertyChanged += (_, e) => changed.Add(e.PropertyName!);
 

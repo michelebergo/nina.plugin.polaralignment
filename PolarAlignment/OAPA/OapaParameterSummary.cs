@@ -1,4 +1,3 @@
-using System;
 using System.Globalization;
 
 namespace NINA.Plugins.PolarAlignment.OAPA {
@@ -16,7 +15,10 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
                        $"backlash {backlashArcmin.ToString("0.##", c)}', mode {backlashMode}, " +
                        $"speed {speed.ToString("0.##", c)} steps/s";
 
-            if (gearRatio > 0) {
+            // A factor of 1 is the factory default: the platform has never been calibrated,
+            // and inventing a reading from it would be worse than showing none (matches
+            // UniversalPolarAlignmentOAPAVM.PhysicalSpeed's guard on the same calculation).
+            if (gearRatio > 1) {
                 var arcminPerSecond = speed / gearRatio;
                 line += $" (~ {arcminPerSecond.ToString("0.##", c)} '/s)";
             }

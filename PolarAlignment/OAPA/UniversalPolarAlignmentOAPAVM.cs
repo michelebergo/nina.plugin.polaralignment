@@ -70,6 +70,14 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
         /// Live alignment error for the readout above the manual controls. Internal so tests
         /// can feed it directly without a broker.
         /// </summary>
+        /// <remarks>
+        /// Never disposed in production: this VM is constructed once and held for the rest of
+        /// the process by PolarAlignmentPlugin.UniversalPolarAlignmentOAPAVM (a static
+        /// property, set in the plugin constructor and never cleared), so the monitor's
+        /// heartbeat timer is intentionally scoped to the process's lifetime, same as the VM
+        /// itself. The Dispose path exists for tests, which construct and discard many VMs per
+        /// run and would otherwise leak a live timer per instance.
+        /// </remarks>
         internal AlignmentErrorMonitor ErrorMonitor { get; }
 
         private void OnAlignmentErrorChanged() {
@@ -90,8 +98,11 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
         private static string Magnitude(double? arcmin) =>
             arcmin.HasValue ? arcmin.Value.ToString("0.00", CultureInfo.InvariantCulture) + "'" : NoValue;
 
-        // Azimuth and altitude keep the publisher's sign: it tells the user which way to
-        // nudge. Total is a magnitude.
+        // Azimuth and altitude are shown signed as the alignment measures them, so the
+        // number itself is comparable across successive nudges. The sign's meaning is
+        // hemisphere- and Reverse-flag-dependent (see TPAPAVM's direction strings and the
+        // correction controller's empirically learned mapping), so this readout does not
+        // claim to tell you which way to press a button. Total is a magnitude.
         public string AzimuthErrorDisplay => Signed(ErrorMonitor.AzimuthErrorArcmin);
         public string AltitudeErrorDisplay => Signed(ErrorMonitor.AltitudeErrorArcmin);
         public string TotalErrorDisplay => Magnitude(ErrorMonitor.TotalErrorArcmin);

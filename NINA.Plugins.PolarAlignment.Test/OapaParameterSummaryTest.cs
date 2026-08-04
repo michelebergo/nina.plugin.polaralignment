@@ -32,8 +32,20 @@ namespace NINA.Plugins.PolarAlignment.Test {
         }
 
         [Test]
-        public void ForAxis_OmitsTheSkyRateWhenTheGearRatioIsNotUsable() {
-            // Inventing a rate from a zero or negative ratio would be worse than showing none.
+        public void ForAxis_OmitsTheSkyRateWhenTheGearRatioIsTheFactoryDefault() {
+            // 1.0 is the factory default for OAPAXGearRatio/OAPAYGearRatio, so this is what
+            // every new tester's first, uncalibrated connect actually sends through here —
+            // not 0. Printing a rate from it would assert a fabricated "16 degrees of sky
+            // per second" as fact in the one log line whose entire purpose is to be trusted.
+            var line = OapaParameterSummary.ForAxis("X (Azimuth)", 1.0, 0.0, "Off", 1000.0);
+
+            line.Should().Contain("X (Azimuth)");
+            line.Should().NotContain("'/s");
+        }
+
+        [Test]
+        public void ForAxis_OmitsTheSkyRateWhenTheGearRatioIsZero() {
+            // Zero (and negative) ratios are also non-physical and must not produce a rate.
             var line = OapaParameterSummary.ForAxis("X (Azimuth)", 0.0, 0.0, "Off", 1000.0);
 
             line.Should().Contain("X (Azimuth)");
