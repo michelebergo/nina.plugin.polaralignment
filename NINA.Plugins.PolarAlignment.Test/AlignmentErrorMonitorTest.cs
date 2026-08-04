@@ -19,8 +19,8 @@ namespace NINA.Plugins.PolarAlignment.Test {
         public Guid? CorrelationId => null;
         public int Version => 1;
         public IDictionary<string, object> CustomHeaders => new Dictionary<string, object>();
-        public string Topic { get; init; }
-        public object Content { get; init; }
+        public required string Topic { get; init; }
+        public required object Content { get; init; }
     }
 
     /// <summary>
@@ -144,6 +144,40 @@ namespace NINA.Plugins.PolarAlignment.Test {
             await monitor.OnMessageReceived(ErrorMessage(0.25, -0.1, 0.269));
 
             fired.Should().Be(1);
+        }
+
+        [Test]
+        public async Task Heartbeat_DoesNotRunUntilTheFirstMessageArrives() {
+            // A timer started in the constructor would tick for the lifetime of every view
+            // model that owns a monitor, including the many built with default arguments
+            // across unrelated test files. It must not exist until there is something to
+            // re-evaluate.
+            using var monitor = new AlignmentErrorMonitor(messageBroker: null, clock: () => now, startHeartbeat: true);
+            monitor.IsHeartbeatRunning.Should().BeFalse();
+
+            await monitor.OnMessageReceived(ErrorMessage(0.25, -0.1, 0.269));
+
+            monitor.IsHeartbeatRunning.Should().BeTrue();
+        }
+
+        [Test]
+        public async Task Heartbeat_NeverStarts_WhenDisabled() {
+            var monitor = Monitor(); // startHeartbeat: false, as every other test in this file relies on.
+            await monitor.OnMessageReceived(ErrorMessage(0.25, -0.1, 0.269));
+
+            monitor.IsHeartbeatRunning.Should().BeFalse();
+        }
+
+        [Test]
+        public void Dispose_IsSafeToCallTwice() {
+            var monitor = new AlignmentErrorMonitor(messageBroker: null, clock: () => now, startHeartbeat: true);
+
+            var act = () => {
+                monitor.Dispose();
+                monitor.Dispose();
+            };
+
+            act.Should().NotThrow();
         }
     }
 }

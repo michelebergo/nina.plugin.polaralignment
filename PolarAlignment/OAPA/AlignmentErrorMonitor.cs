@@ -16,7 +16,7 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
     /// message. Expiry also covers what such a signal would miss anyway - the alignment
     /// window closed mid-run, a crash, a disconnected cable.
     /// </summary>
-    public sealed class AlignmentErrorMonitor : ISubscriber {
+    public sealed class AlignmentErrorMonitor : ISubscriber, IDisposable {
 
         /// <summary>
         /// Topic published by <see cref="Instructions.PolarAlignmentErrorMessage"/>. Held as a
@@ -35,7 +35,9 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
         private static readonly TimeSpan HeartbeatInterval = TimeSpan.FromSeconds(10);
 
         private readonly Func<DateTime> clock;
-        private readonly System.Timers.Timer heartbeat;
+        private readonly bool startHeartbeat;
+        private System.Timers.Timer heartbeat;
+        private bool disposed;
 
         private double azimuthDegrees;
         private double altitudeDegrees;
@@ -44,16 +46,16 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
 
         public AlignmentErrorMonitor(IMessageBroker messageBroker, Func<DateTime> clock = null, bool startHeartbeat = true) {
             this.clock = clock ?? (() => DateTime.UtcNow);
+            this.startHeartbeat = startHeartbeat;
 
             // A null broker is legitimate: the view model is constructed without one in tests
             // and in any host that does not provide the plugin message broker.
             messageBroker?.Subscribe(ErrorTopic, this);
 
-            if (startHeartbeat) {
-                heartbeat = new System.Timers.Timer(HeartbeatInterval.TotalMilliseconds) { AutoReset = true };
-                heartbeat.Elapsed += (_, _) => Changed?.Invoke();
-                heartbeat.Start();
-            }
+            // No timer is created here. This type is constructed by every OAPA view model in
+            // every test that touches one - a timer started here would tick, live, for the
+            // duration of every such test. It is started lazily in OnMessageReceived instead,
+            // once there is an actual measurement whose expiry is worth re-evaluating.
         }
 
         /// <summary>Raised when the exposed values may have changed. The view model forwards it.</summary>
@@ -65,6 +67,9 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
         public double? AzimuthErrorArcmin => IsLive ? azimuthDegrees * 60.0 : null;
         public double? AltitudeErrorArcmin => IsLive ? altitudeDegrees * 60.0 : null;
         public double? TotalErrorArcmin => IsLive ? totalDegrees * 60.0 : null;
+
+        /// <summary>Test-only visibility into whether the lazily-started heartbeat is currently ticking.</summary>
+        internal bool IsHeartbeatRunning => heartbeat?.Enabled ?? false;
 
         public Task OnMessageReceived(IMessage message) {
             if (message?.Topic != ErrorTopic) { return Task.CompletedTask; }
@@ -90,8 +95,40 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
                 return Task.CompletedTask;
             }
 
+            StartHeartbeatIfNeeded();
             Changed?.Invoke();
             return Task.CompletedTask;
+        }
+
+        /// <summary>
+        /// Starts the heartbeat on the first accepted measurement, and restarts it if a prior
+        /// run stopped itself after an expiry. A no-op once disposed, so a message arriving
+        /// after the owning view model is torn down cannot resurrect a timer.
+        /// </summary>
+        private void StartHeartbeatIfNeeded() {
+            if (!startHeartbeat || disposed) { return; }
+
+            if (heartbeat == null) {
+                heartbeat = new System.Timers.Timer(HeartbeatInterval.TotalMilliseconds) { AutoReset = true };
+                heartbeat.Elapsed += OnHeartbeatElapsed;
+            }
+
+            if (!heartbeat.Enabled) {
+                heartbeat.Start();
+            }
+        }
+
+        /// <summary>
+        /// Re-evaluates on the heartbeat cadence so an expiry becomes visible without a
+        /// further message, then stops itself once expired: there is nothing left to expire,
+        /// so there is nothing left to re-evaluate. <see cref="StartHeartbeatIfNeeded"/> starts
+        /// it again if a new measurement arrives later.
+        /// </summary>
+        private void OnHeartbeatElapsed(object sender, System.Timers.ElapsedEventArgs e) {
+            if (!IsLive) {
+                heartbeat.Stop();
+            }
+            Changed?.Invoke();
         }
 
         /// <summary>
@@ -101,6 +138,18 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
         private static double? ReadDouble(object content, string propertyName) {
             var value = content?.GetType().GetProperty(propertyName)?.GetValue(content);
             return value is null ? null : Convert.ToDouble(value);
+        }
+
+        public void Dispose() {
+            if (disposed) { return; }
+            disposed = true;
+
+            if (heartbeat != null) {
+                heartbeat.Elapsed -= OnHeartbeatElapsed;
+                heartbeat.Stop();
+                heartbeat.Dispose();
+                heartbeat = null;
+            }
         }
     }
 }
