@@ -193,4 +193,52 @@ namespace NINA.Plugins.PolarAlignment.Test {
             monitor.IsHeartbeatRunning.Should().BeFalse();
         }
     }
+
+    /// <summary>
+    /// The panel binds to pre-formatted strings so the "no live value" state is an em dash
+    /// rather than an empty row, and so no value converter is needed.
+    /// </summary>
+    public class OapaErrorReadoutTest {
+
+        [Test]
+        public void WithNoMeasurement_AllThreeReadEmDash() {
+            var vm = new UniversalPolarAlignmentOAPAVM(null, null, null, null, null);
+
+            vm.AzimuthErrorDisplay.Should().Be("—");
+            vm.AltitudeErrorDisplay.Should().Be("—");
+            vm.TotalErrorDisplay.Should().Be("—");
+        }
+
+        [Test]
+        public async Task AfterAMeasurement_ValuesAreFormattedInArcminutesWithSign() {
+            var vm = new UniversalPolarAlignmentOAPAVM(null, null, null, null, null);
+
+            await vm.ErrorMonitor.OnMessageReceived(new FakeMessage {
+                Topic = AlignmentErrorMonitor.ErrorTopic,
+                Content = new { AzimuthError = 0.25, AltitudeError = -0.1, TotalError = 0.269 }
+            });
+
+            // Sign matters: it tells the user which way to nudge, which is the whole point
+            // of putting the numbers next to the buttons.
+            vm.AzimuthErrorDisplay.Should().Be("+15.00'");
+            vm.AltitudeErrorDisplay.Should().Be("-6.00'");
+            vm.TotalErrorDisplay.Should().Be("16.14'");
+        }
+
+        [Test]
+        public async Task AMeasurement_RaisesPropertyChangedForTheThreeDisplays() {
+            var vm = new UniversalPolarAlignmentOAPAVM(null, null, null, null, null);
+            var changed = new List<string>();
+            vm.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+
+            await vm.ErrorMonitor.OnMessageReceived(new FakeMessage {
+                Topic = AlignmentErrorMonitor.ErrorTopic,
+                Content = new { AzimuthError = 0.25, AltitudeError = -0.1, TotalError = 0.269 }
+            });
+
+            changed.Should().Contain(nameof(UniversalPolarAlignmentOAPAVM.AzimuthErrorDisplay));
+            changed.Should().Contain(nameof(UniversalPolarAlignmentOAPAVM.AltitudeErrorDisplay));
+            changed.Should().Contain(nameof(UniversalPolarAlignmentOAPAVM.TotalErrorDisplay));
+        }
+    }
 }

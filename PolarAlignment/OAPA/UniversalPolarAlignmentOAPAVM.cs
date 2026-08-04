@@ -1,4 +1,5 @@
 using NINA.Core.Utility;
+using NINA.Plugin.Interfaces;
 using NINA.Profile.Interfaces;
 using NINA.Plugins.PolarAlignment.OAPA;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -26,9 +27,15 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
             IImagingMediator imagingMediator,
             ITelescopeMediator telescopeMediator,
             IPlateSolverFactory plateSolverFactory,
-            ICameraMediator cameraMediator) : base(profileService) {
+            ICameraMediator cameraMediator,
+            IMessageBroker messageBroker = null) : base(profileService) {
             calibrationSolver = new OapaPlateSolveSampler(profileService, imagingMediator, telescopeMediator, plateSolverFactory);
             this.cameraMediator = cameraMediator;
+
+            // The broker is optional so the ten existing test fixtures keep their
+            // five-argument construction; a null broker simply means no subscription.
+            ErrorMonitor = new AlignmentErrorMonitor(messageBroker);
+            ErrorMonitor.Changed += OnAlignmentErrorChanged;
 
             // Connected and IsNotMoving live on the base VM. Their generated
             // [NotifyCanExecuteChangedFor] attributes can't reference commands declared on
@@ -58,6 +65,36 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
             GoHomeCommand.NotifyCanExecuteChanged();
             StopMotionCommand.NotifyCanExecuteChanged();
         }
+
+        /// <summary>
+        /// Live alignment error for the readout above the manual controls. Internal so tests
+        /// can feed it directly without a broker.
+        /// </summary>
+        internal AlignmentErrorMonitor ErrorMonitor { get; }
+
+        private void OnAlignmentErrorChanged() {
+            RaisePropertyChanged(nameof(AzimuthErrorDisplay));
+            RaisePropertyChanged(nameof(AltitudeErrorDisplay));
+            RaisePropertyChanged(nameof(TotalErrorDisplay));
+        }
+
+        /// <summary>Placeholder shown before the first measurement and after expiry.</summary>
+        private const string NoValue = "—";
+
+        // The arcminute tick is appended rather than embedded in the format string: in a
+        // .NET custom numeric format an apostrophe quotes a literal section, so "0.00'"
+        // does not mean what it looks like.
+        private static string Signed(double? arcmin) =>
+            arcmin.HasValue ? arcmin.Value.ToString("+0.00;-0.00", CultureInfo.InvariantCulture) + "'" : NoValue;
+
+        private static string Magnitude(double? arcmin) =>
+            arcmin.HasValue ? arcmin.Value.ToString("0.00", CultureInfo.InvariantCulture) + "'" : NoValue;
+
+        // Azimuth and altitude keep the publisher's sign: it tells the user which way to
+        // nudge. Total is a magnitude.
+        public string AzimuthErrorDisplay => Signed(ErrorMonitor.AzimuthErrorArcmin);
+        public string AltitudeErrorDisplay => Signed(ErrorMonitor.AltitudeErrorArcmin);
+        public string TotalErrorDisplay => Magnitude(ErrorMonitor.TotalErrorArcmin);
 
         // Safety control: available whenever connected — including while a move or the
         // calibration is driving the motors, which is precisely when it is needed.
