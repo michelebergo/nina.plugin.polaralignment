@@ -211,3 +211,40 @@ Lower-altitude fields are generally less forgiving, so if practical, choose a fi
 For the southern hemisphere, the preferred pole-side region is due south.
 
 ![TPPA_Zones](./TPPA_Zones.png)
+
+## Where do I put the polar alignment in an advanced sequence?
+
+In the start area of your sequence, in this order:
+
+1. Unpark scope — the instruction fails validation if the mount is parked
+2. Cool camera
+3. Three Point Polar Alignment
+4. Slew and centre on your target
+5. Autofocus
+6. Start guiding
+7. Imaging
+
+Set the instruction's **Alignment Tolerance above zero** (0.5 to 1 arcmin is a good value). That tolerance is what tells the routine it is finished, so it can close its window and hand control back to the sequencer. Left at zero, the sequence simply waits for you to close the window by hand.
+
+Two things not to do. Do not start guiding beforehand: the instruction stops guiding anyway, and any guider calibration made before the alignment is invalid afterwards. Do not slew to your target first: unless you tick "Start from current position", the instruction slews to its own starting point.
+
+## Is there an error above which I have to correct manually first?
+
+No. There is no threshold at which automated adjustment stops working, because the limit applies to each correction, not to the starting error. Large errors are simply corrected over more cycles.
+
+For OAPA the per-cycle limit is `min(max(5', 0.8 x current total error), Max correction magnitude)`. The setting defaults to 30 arcmin and accepts 1 to 60. A starting error of 9°52' converged in about 4.7 minutes with the ceiling at 60, and about 6.5 minutes at 30. Raising it shortens the coarse phase at the cost of a larger excursion in the case where the calibration is wrong, so leave it at 30 until a calibration you trust is applied.
+
+Separately, **Auto verification run** re-runs the entire three-point measurement and correction once when the alignment started from more than 2° of error, taking a fresh measurement rather than trusting an estimate built from a poor starting point. It runs at most one extra cycle, and it is **not enabled by default** — turn it on in the plugin options if you routinely start from a large error.
+
+## Which backlash mode should I use, and why is Apply sometimes greyed out?
+
+Applying a calibration sets the recommended mode automatically. If you are choosing by hand:
+
+* **Off** — the measured backlash is below the noise floor of the plate solves. Nothing to compensate.
+* **Full** — the backlash is small and repeatable. A reversal is extended by the whole measured value.
+* **Soft** — as Full, but extending by 75%. A conservative choice when the value may be overestimated.
+* **Unidirectional** — the backlash is large, or it changes with load. Each move overshoots and returns, so the final approach always comes from the same direction and the play never enters the loop. Moves take longer, and with a large backlash they can take tens of seconds.
+
+**Apply is greyed out after a calibration when slippage was detected**: the backlash measured differently in the two directions, so no single compensation value is valid. This is a mechanical finding, not a plugin fault, and the message under the results says which axis. Check grub screws, belt tension and friction with the real payload mounted, then calibrate again. The measured values deliberately stay on screen so you can use them for diagnosis.
+
+If the correction loop converges nicely and then loses ground every time an axis reverses direction, that is the same problem seen from the other side. Unidirectional mode works around it; the mechanics are the actual fix.
