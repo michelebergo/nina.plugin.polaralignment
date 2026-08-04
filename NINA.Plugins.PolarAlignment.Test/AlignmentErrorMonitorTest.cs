@@ -229,7 +229,7 @@ namespace NINA.Plugins.PolarAlignment.Test {
         public async Task AMeasurement_RaisesPropertyChangedForTheThreeDisplays() {
             var vm = new UniversalPolarAlignmentOAPAVM(null, null, null, null, null);
             var changed = new List<string>();
-            vm.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+            vm.PropertyChanged += (_, e) => changed.Add(e.PropertyName!);
 
             await vm.ErrorMonitor.OnMessageReceived(new FakeMessage {
                 Topic = AlignmentErrorMonitor.ErrorTopic,
