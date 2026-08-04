@@ -101,6 +101,12 @@
                                 <s:Int32>800</s:Int32>
                                 <s:Int32>900</s:Int32>
                                 <s:Int32>1000</s:Int32>
+                                <s:Int32>1250</s:Int32>
+                                <s:Int32>1500</s:Int32>
+                                <s:Int32>1750</s:Int32>
+                                <s:Int32>2000</s:Int32>
+                                <s:Int32>2500</s:Int32>
+                                <s:Int32>3000</s:Int32>
                             </x:Array>
                         </ComboBox.ItemsSource>
                     </ComboBox>
@@ -157,6 +163,12 @@
                                 <s:Int32>800</s:Int32>
                                 <s:Int32>900</s:Int32>
                                 <s:Int32>1000</s:Int32>
+                                <s:Int32>1250</s:Int32>
+                                <s:Int32>1500</s:Int32>
+                                <s:Int32>1750</s:Int32>
+                                <s:Int32>2000</s:Int32>
+                                <s:Int32>2500</s:Int32>
+                                <s:Int32>3000</s:Int32>
                             </x:Array>
                         </ComboBox.ItemsSource>
                     </ComboBox>

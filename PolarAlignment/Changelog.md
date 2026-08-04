@@ -1,5 +1,10 @@
 # Changelog
 
+## Version 2.2.7.0 (beta rc13.1)
+- The motor **speed dropdown now reaches 3000 steps/s**, the firmware's actual ceiling. It offered 100-1000, a range inherited unchanged from the pre-OAPA panel and harmless for as long as the firmware ignored the F feed value entirely — rc10 made the firmware honour it, and the list silently became a cap. Field symptom: a tester whose altitude axis runs at 1000 steps per arcminute was held at 0.6 arcmin/s, on the one axis where speed mattered, with no way to ask for more (the dropdown cannot be typed into). New values: 1250, 1500, 1750, 2000, 2500, 3000.
+- New tests tie the offered range to the firmware's own `JOG_SPEED_MIN`/`JOG_SPEED_MAX` constants, so the two cannot drift apart again.
+- Firmware unchanged (1.2.2).
+
 ## Version 2.2.7.0 (beta rc13)
 - The OAPA panel shows the live polar alignment error (azimuth, altitude, total) above the manual controls, so a nudge and its effect are visible without switching to the alignment window. The values clear after 90 seconds without a measurement, so what is shown is always live.
 - The motion parameters of both axes — gear ratio, backlash, backlash mode and speed, with the implied sky rate — are logged when the controller connects.
