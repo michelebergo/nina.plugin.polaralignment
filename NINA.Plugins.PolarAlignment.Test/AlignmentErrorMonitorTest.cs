@@ -179,5 +179,18 @@ namespace NINA.Plugins.PolarAlignment.Test {
 
             act.Should().NotThrow();
         }
+
+        [Test]
+        public async Task ADisposedMonitor_IgnoresALaterMessage_AndStartsNoTimer() {
+            // Pins the ordering that matters for the Dispose/OnMessageReceived race: once
+            // Dispose has returned, nothing arriving afterwards may resurrect the heartbeat.
+            var monitor = new AlignmentErrorMonitor(messageBroker: null, clock: () => now, startHeartbeat: true);
+            monitor.Dispose();
+
+            var act = async () => await monitor.OnMessageReceived(ErrorMessage(0.25, -0.1, 0.269));
+
+            await act.Should().NotThrowAsync();
+            monitor.IsHeartbeatRunning.Should().BeFalse();
+        }
     }
 }

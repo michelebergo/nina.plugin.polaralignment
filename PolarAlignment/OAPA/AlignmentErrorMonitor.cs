@@ -36,6 +36,16 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
 
         private readonly Func<DateTime> clock;
         private readonly bool startHeartbeat;
+
+        /// <summary>
+        /// Guards <see cref="heartbeat"/> and <see cref="disposed"/>. Both are read and written
+        /// from at least two threads: whatever delivers broker messages, and whichever thread
+        /// disposes the owning view model, plus the ThreadPool thread the timer itself ticks
+        /// on. Never invoke <see cref="Changed"/> while holding it - a subscriber running under
+        /// this lock is how a deadlock gets made.
+        /// </summary>
+        private readonly object gate = new();
+
         private System.Timers.Timer heartbeat;
         private bool disposed;
 
@@ -69,7 +79,13 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
         public double? TotalErrorArcmin => IsLive ? totalDegrees * 60.0 : null;
 
         /// <summary>Test-only visibility into whether the lazily-started heartbeat is currently ticking.</summary>
-        internal bool IsHeartbeatRunning => heartbeat?.Enabled ?? false;
+        internal bool IsHeartbeatRunning {
+            get {
+                lock (gate) {
+                    return heartbeat?.Enabled ?? false;
+                }
+            }
+        }
 
         public Task OnMessageReceived(IMessage message) {
             if (message?.Topic != ErrorTopic) { return Task.CompletedTask; }
@@ -102,19 +118,27 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
 
         /// <summary>
         /// Starts the heartbeat on the first accepted measurement, and restarts it if a prior
-        /// run stopped itself after an expiry. A no-op once disposed, so a message arriving
-        /// after the owning view model is torn down cannot resurrect a timer.
+        /// run stopped itself after an expiry. A no-op once disposed - the disposed check and
+        /// the read/create/start of <see cref="heartbeat"/> all happen inside <see cref="gate"/>
+        /// so a message racing a concurrent <see cref="Dispose"/> either completes first (and
+        /// Dispose then tears down the timer it created) or observes <see cref="disposed"/>
+        /// already set (and creates nothing) - it can never resurrect a timer after Dispose has
+        /// already returned.
         /// </summary>
         private void StartHeartbeatIfNeeded() {
-            if (!startHeartbeat || disposed) { return; }
+            if (!startHeartbeat) { return; }
 
-            if (heartbeat == null) {
-                heartbeat = new System.Timers.Timer(HeartbeatInterval.TotalMilliseconds) { AutoReset = true };
-                heartbeat.Elapsed += OnHeartbeatElapsed;
-            }
+            lock (gate) {
+                if (disposed) { return; }
 
-            if (!heartbeat.Enabled) {
-                heartbeat.Start();
+                if (heartbeat == null) {
+                    heartbeat = new System.Timers.Timer(HeartbeatInterval.TotalMilliseconds) { AutoReset = true };
+                    heartbeat.Elapsed += OnHeartbeatElapsed;
+                }
+
+                if (!heartbeat.Enabled) {
+                    heartbeat.Start();
+                }
             }
         }
 
@@ -123,11 +147,24 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
         /// further message, then stops itself once expired: there is nothing left to expire,
         /// so there is nothing left to re-evaluate. <see cref="StartHeartbeatIfNeeded"/> starts
         /// it again if a new measurement arrives later.
+        ///
+        /// Operates on <paramref name="sender"/> rather than the <see cref="heartbeat"/> field:
+        /// <see cref="System.Timers.Timer"/> dispatches Elapsed on the ThreadPool, so a tick
+        /// already queued when <see cref="Dispose"/> runs can still execute after the field has
+        /// been nulled out. Reading the field here would risk a NullReferenceException on a
+        /// background thread; the sender is the timer instance itself and is never null.
         /// </summary>
         private void OnHeartbeatElapsed(object sender, System.Timers.ElapsedEventArgs e) {
-            if (!IsLive) {
-                heartbeat.Stop();
+            if (sender is System.Timers.Timer tickedTimer && !IsLive) {
+                lock (gate) {
+                    // Only stop it if it is still the current, live heartbeat: Dispose may have
+                    // already taken ownership of this exact instance and be tearing it down.
+                    if (!disposed && ReferenceEquals(heartbeat, tickedTimer)) {
+                        tickedTimer.Stop();
+                    }
+                }
             }
+
             Changed?.Invoke();
         }
 
@@ -141,14 +178,20 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
         }
 
         public void Dispose() {
-            if (disposed) { return; }
-            disposed = true;
+            System.Timers.Timer owned;
 
-            if (heartbeat != null) {
-                heartbeat.Elapsed -= OnHeartbeatElapsed;
-                heartbeat.Stop();
-                heartbeat.Dispose();
+            lock (gate) {
+                if (disposed) { return; }
+                disposed = true;
+
+                owned = heartbeat;
                 heartbeat = null;
+            }
+
+            if (owned != null) {
+                owned.Elapsed -= OnHeartbeatElapsed;
+                owned.Stop();
+                owned.Dispose();
             }
         }
     }
