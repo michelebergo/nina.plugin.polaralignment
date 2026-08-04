@@ -1,5 +1,10 @@
 # Changelog
 
+## Version 2.2.7.0 (beta rc13.2)
+- **The self-calibration now waits between a move and the measurement that follows it**, using the same "Automated adjustment settle time" the correction loop has always used (default 2 s). The correction loop settled; the calibration went straight from the move to the capture. On a high-friction axis that keeps relaxing after the controller reports idle — one tester watched the position creep for about a second after every stop — the calibration was measuring a moving target: the response reads short, the two backlash transitions disagree, and the slippage detector then blocks an Apply for a calibration that was never measurable. Field symptom: Apply permanently greyed out on a rig whose mechanics were not, in fact, unrepeatable.
+- Every calibration move now goes through one helper that owns the settle, so a move added later cannot silently skip it. S0, which measures solve noise with the axis at rest, deliberately does not wait.
+- Firmware unchanged (1.2.2).
+
 ## Version 2.2.7.0 (beta rc13.1)
 - The motor **speed dropdown now reaches 3000 steps/s**, the firmware's actual ceiling. It offered 100-1000, a range inherited unchanged from the pre-OAPA panel and harmless for as long as the firmware ignored the F feed value entirely — rc10 made the firmware honour it, and the list silently became a cap. Field symptom: a tester whose altitude axis runs at 1000 steps per arcminute was held at 0.6 arcmin/s, on the one axis where speed mattered, with no way to ask for more (the dropdown cannot be typed into). New values: 1250, 1500, 1750, 2000, 2500, 3000.
 - New tests tie the offered range to the firmware's own `JOG_SPEED_MIN`/`JOG_SPEED_MAX` constants, so the two cannot drift apart again.

@@ -109,6 +109,89 @@ namespace NINA.Plugins.PolarAlignment.Test {
             public double PhysicalPositionArcmin => physicalPositionArcmin;
         }
 
+        /// <summary>
+        /// Wraps a <see cref="FakeAxis"/> and records the order of moves, settles and solves.
+        /// The settle exists to separate two specific operations, so ordering is the thing
+        /// worth asserting - a settle that happens at the wrong moment is no settle at all.
+        /// </summary>
+        private sealed class OrderRecordingAxis : IOapaCalibrationMotion, IOapaCalibrationSolver {
+            private readonly FakeAxis inner;
+            public readonly List<string> Events = new();
+            public readonly List<TimeSpan> Settles = new();
+
+            public OrderRecordingAxis(FakeAxis inner) {
+                this.inner = inner;
+            }
+
+            public Task MoveRelative(Axis axis, float arcmin, CancellationToken token) {
+                Events.Add("move");
+                return inner.MoveRelative(axis, arcmin, token);
+            }
+
+            public Task<CalibrationSolveSample> CaptureAndSolve(CancellationToken token) {
+                Events.Add("solve");
+                return inner.CaptureAndSolve(token);
+            }
+
+            /// <summary>Stands in for Task.Delay so the tests never wait on real time.</summary>
+            public Task Settle(TimeSpan requested, CancellationToken token) {
+                Events.Add("settle");
+                Settles.Add(requested);
+                return Task.CompletedTask;
+            }
+        }
+
+        [Test]
+        public async Task Calibration_SettlesAfterEveryMove_BeforeMeasuring() {
+            // A high-friction axis keeps relaxing for about a second after the controller
+            // reports idle. Solving into that relaxation measures a moving target: the
+            // response comes out short, the two backlash transitions disagree, and the
+            // slippage detector then correctly refuses a calibration that was never
+            // measurable. The correction loop already waits; this is the same wait.
+            var recorder = new OrderRecordingAxis(new FakeAxis(responseScale: 0.5, physicalBacklashArcmin: 5.0));
+            var service = new OapaCalibrationService(recorder, recorder,
+                settleTime: TimeSpan.FromSeconds(2), delay: recorder.Settle);
+
+            await service.CalibrateAxisWithAutoReverse(
+                Axis.YAxis, currentRatio: 100f, reversed: false, "Y", null, CancellationToken.None);
+
+            for (var i = 0; i < recorder.Events.Count - 1; i++) {
+                if (recorder.Events[i] == "move") {
+                    recorder.Events[i + 1].Should().Be("settle",
+                        $"every move must be followed by a settle before anything else (event {i})");
+                }
+            }
+            recorder.Settles.Should().NotBeEmpty("the calibration moves, so it must settle");
+            recorder.Settles.Should().AllSatisfy(t => t.Should().Be(TimeSpan.FromSeconds(2)));
+        }
+
+        [Test]
+        public async Task Calibration_DoesNotSettleBeforeTheNoiseMeasurement() {
+            // S0 measures solve noise with the axis at rest. Nothing has moved, so waiting
+            // there would only lengthen every calibration for no reason.
+            var recorder = new OrderRecordingAxis(new FakeAxis(responseScale: 0.5, physicalBacklashArcmin: 5.0));
+            var service = new OapaCalibrationService(recorder, recorder,
+                settleTime: TimeSpan.FromSeconds(2), delay: recorder.Settle);
+
+            await service.CalibrateAxisWithAutoReverse(
+                Axis.YAxis, currentRatio: 100f, reversed: false, "Y", null, CancellationToken.None);
+
+            recorder.Events.First().Should().Be("solve", "the noise measurement comes before any motion");
+        }
+
+        [Test]
+        public async Task Calibration_WithNoSettleConfigured_DoesNotWaitAtAll() {
+            // The default has to stay zero: every other calibration test constructs the
+            // service without a settle and must keep running at full speed.
+            var recorder = new OrderRecordingAxis(new FakeAxis(responseScale: 0.5, physicalBacklashArcmin: 5.0));
+            var service = new OapaCalibrationService(recorder, recorder, delay: recorder.Settle);
+
+            await service.CalibrateAxisWithAutoReverse(
+                Axis.YAxis, currentRatio: 100f, reversed: false, "Y", null, CancellationToken.None);
+
+            recorder.Settles.Should().BeEmpty("a zero settle must not queue a delay at all");
+        }
+
         [Test]
         public async Task Calibration_RecoversResponseAndPhysicalBacklash() {
             // The axis physically moves half of what is commanded and its mechanics lose

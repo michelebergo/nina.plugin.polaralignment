@@ -607,8 +607,12 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
                         CalibrationConsistencyMessage = string.Empty;
                     });
 
-                    Logger.Info("OAPA self-calibration started");
-                    var service = new OapaCalibrationService(new SpeedAwareMotion(this), calibrationSolver);
+                    Logger.Info($"OAPA self-calibration started (settle {AutomatedAdjustmentSettleTime}s between move and solve)");
+                    // Same settle the correction loop uses: a high-friction axis is still
+                    // relaxing when the controller reports idle, and solving into that
+                    // relaxation is what makes the two backlash transitions disagree.
+                    var service = new OapaCalibrationService(new SpeedAwareMotion(this), calibrationSolver,
+                        settleTime: TimeSpan.FromSeconds(AutomatedAdjustmentSettleTime));
                     Action<string> reportStatus = s => _ = RunOnUi(() => CalibrationStatus = s);
 
                     var x = await service.CalibrateAxisWithAutoReverse(

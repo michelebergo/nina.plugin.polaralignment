@@ -51,11 +51,38 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
         private readonly IOapaCalibrationMotion motion;
         private readonly IOapaCalibrationSolver solver;
         private readonly float calibrationStepArcmin;
+        private readonly TimeSpan settleTime;
+        private readonly Func<TimeSpan, CancellationToken, Task> delay;
 
-        public OapaCalibrationService(IOapaCalibrationMotion motion, IOapaCalibrationSolver solver, float calibrationStepArcmin = 45.0f) {
+        public OapaCalibrationService(
+            IOapaCalibrationMotion motion,
+            IOapaCalibrationSolver solver,
+            float calibrationStepArcmin = 45.0f,
+            TimeSpan settleTime = default,
+            Func<TimeSpan, CancellationToken, Task> delay = null) {
+
             this.motion = motion;
             this.solver = solver;
             this.calibrationStepArcmin = calibrationStepArcmin;
+            this.settleTime = settleTime;
+            this.delay = delay ?? ((t, ct) => Task.Delay(t, ct));
+        }
+
+        /// <summary>
+        /// Every move goes through here so none can be added later without its settle.
+        ///
+        /// A high-friction axis keeps relaxing after the controller reports idle - one
+        /// tester watched the position creep for about a second after every stop. Capturing
+        /// into that relaxation measures a moving target: the response reads short, the two
+        /// backlash transitions disagree, and the slippage detector then blocks a
+        /// calibration that was never measurable in the first place. The correction loop has
+        /// waited between move and solve since it existed; the calibration never did.
+        /// </summary>
+        private async Task MoveAndSettle(Axis axis, float arcmin, CancellationToken token) {
+            await motion.MoveRelative(axis, arcmin, token).ConfigureAwait(false);
+            if (settleTime > TimeSpan.Zero) {
+                await delay(settleTime, token).ConfigureAwait(false);
+            }
         }
 
         /// <summary>
@@ -121,7 +148,7 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
             // the signed physical displacement measured by the next solve.
             async Task<double> MoveAndMeasure(float logicalArcmin, float logicalDirection) {
                 var wire = dirSign * logicalDirection * logicalArcmin;
-                await motion.MoveRelative(axis, wire, token).ConfigureAwait(false);
+                await MoveAndSettle(axis, wire, token).ConfigureAwait(false);
                 movedArcmin += wire;
                 var now = await NextSolve().ConfigureAwait(false);
                 var d = OapaCalibrationGeometry.SignedAxisDisplacementArcmin(isAzimuth, last, now);
@@ -290,7 +317,7 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
                     }
                     var closing = (float)Math.Clamp(-residual / responsePerWire, -3.0 * calibrationStepArcmin, 3.0 * calibrationStepArcmin);
                     reportStatus?.Invoke($"{axisLabel}: returning to start ({residual:+0.0;-0.0}' off)...");
-                    await motion.MoveRelative(axis, closing, token).ConfigureAwait(false);
+                    await MoveAndSettle(axis, closing, token).ConfigureAwait(false);
                     current = await nextSolve().ConfigureAwait(false);
                 }
                 var final = OapaCalibrationGeometry.SignedAxisDisplacementArcmin(isAzimuth, baseline, current);
@@ -317,12 +344,12 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
                     if (Math.Abs(residual) < RestoreToleranceArcmin) { return; }
                     var restore = (float)Math.Clamp(-residual, -cap, cap);
                     Logger.Info($"OAPA cal {axisLabel}: failure with {movedArcmin:F1}' commanded outstanding; measured {residual:F1}' from baseline, driving back");
-                    await motion.MoveRelative(axis, restore, CancellationToken.None).ConfigureAwait(false);
+                    await MoveAndSettle(axis, restore, CancellationToken.None).ConfigureAwait(false);
                 }
             } catch (Exception measureEx) {
                 Logger.Warning($"OAPA cal {axisLabel}: measured restore unavailable ({measureEx.Message}); driving back the commanded sum");
                 try {
-                    await motion.MoveRelative(axis, -movedArcmin, CancellationToken.None).ConfigureAwait(false);
+                    await MoveAndSettle(axis, -movedArcmin, CancellationToken.None).ConfigureAwait(false);
                 } catch (Exception restoreEx) {
                     Logger.Error($"OAPA cal {axisLabel}: failed to restore start position", restoreEx);
                 }
