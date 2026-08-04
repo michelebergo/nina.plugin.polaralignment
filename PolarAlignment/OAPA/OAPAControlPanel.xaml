@@ -16,6 +16,7 @@
         <s:String x:Key="OAPAXBacklashToolTip">Azimuth-axis mechanical backlash in arcminutes, measured automatically by the Self-Calibration. Same value as "Azimuth backlash compensation" in the plugin options.</s:String>
         <s:String x:Key="OAPAYBacklashToolTip">Altitude-axis mechanical backlash in arcminutes, measured automatically by the Self-Calibration. Specific to OAPA platforms.</s:String>
         <s:String x:Key="OAPABacklashModeToolTip">How this axis handles its backlash on direction reversals. Off: no compensation (negligible backlash). Soft: single move extended by 75% of the backlash (conservative if the value may be overestimated). Full: single move extended by the whole backlash. Unidirectional: overshoot past the target and return, so the final approach always comes from the same direction (best for large backlash). Applying a calibration sets the recommended mode automatically.</s:String>
+        <s:String x:Key="OAPAErrorReadoutToolTip">Polar alignment error reported by the running alignment. Azimuth and altitude keep their sign so you can tell which way to nudge. The values clear when no measurement has arrived for 90 seconds, so what you see is always live.</s:String>
     </UserControl.Resources>
 
     <StackPanel>
@@ -24,6 +25,30 @@
             <Run Text="Requires an OAPA-compatible controller running the reference firmware: " />
             <Hyperlink NavigateUri="https://github.com/michelebergo/oapa-firmware" RequestNavigate="Hyperlink_RequestNavigate">github.com/michelebergo/oapa-firmware</Hyperlink>
         </TextBlock>
+
+        <!-- Live alignment error, so manual nudging does not require switching to the
+             alignment window. Clears itself when the values stop being live. -->
+        <GroupBox Header="Alignment Error" Margin="0,5,0,5" ToolTip="{StaticResource OAPAErrorReadoutToolTip}">
+            <Grid Margin="5">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <TextBlock Grid.Row="0" Grid.Column="0" HorizontalAlignment="Center" Text="Azimuth" />
+                <TextBlock Grid.Row="0" Grid.Column="1" HorizontalAlignment="Center" Text="Altitude" />
+                <TextBlock Grid.Row="0" Grid.Column="2" HorizontalAlignment="Center" Text="Total" />
+
+                <TextBlock Grid.Row="1" Grid.Column="0" HorizontalAlignment="Center" FontWeight="Bold" Text="{Binding AzimuthErrorDisplay}" />
+                <TextBlock Grid.Row="1" Grid.Column="1" HorizontalAlignment="Center" FontWeight="Bold" Text="{Binding AltitudeErrorDisplay}" />
+                <TextBlock Grid.Row="1" Grid.Column="2" HorizontalAlignment="Center" FontWeight="Bold" Text="{Binding TotalErrorDisplay}" />
+            </Grid>
+        </GroupBox>
 
         <!-- The guidance every new user otherwise gets by asking: collapsed by default. -->
         <Expander Header="First movement checklist" Margin="0,0,0,5">

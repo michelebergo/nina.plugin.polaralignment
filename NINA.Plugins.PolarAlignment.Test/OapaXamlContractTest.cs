@@ -88,6 +88,25 @@ namespace NINA.Plugins.PolarAlignment.Test {
         }
 
         [Test]
+        public void ErrorReadout_IsPresentAndOutsideTheMotorPanels() {
+            var xaml = PanelXaml;
+
+            // The readout exists at all: a tester nudging manually should not have to switch
+            // to the alignment window to see what the nudge did.
+            foreach (var binding in new[] { "AzimuthErrorDisplay", "AltitudeErrorDisplay", "TotalErrorDisplay" }) {
+                xaml.Should().Contain($"{{Binding {binding}}}",
+                    $"the OAPA panel must show {binding} next to the manual controls");
+            }
+
+            // And it sits above the motor groups: inside one of them, MotorPanels_AreExactAxisMirrors
+            // would read these as per-axis controls and fail on the asymmetry.
+            var firstMotorPanel = xaml.IndexOf("Header=\"Azimuth Motor Settings\"", StringComparison.Ordinal);
+            firstMotorPanel.Should().BeGreaterThan(0, "the panel must still contain the motor groups");
+            xaml.IndexOf("{Binding TotalErrorDisplay}", StringComparison.Ordinal)
+                .Should().BeLessThan(firstMotorPanel, "the readout belongs above the motor panels");
+        }
+
+        [Test]
         public void AzimuthBacklashOption_IsShownOnlyForSystemsWithoutTheirOwnPanel() {
             // The value is one setting with two views, which reads as a duplicate to OAPA
             // users now that the motor panel owns it. UPAS has no motor panel, so the
