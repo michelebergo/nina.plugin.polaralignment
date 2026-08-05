@@ -82,27 +82,33 @@ namespace NINA.Plugins.PolarAlignment.Test {
         }
 
         [Test]
-        public async Task SlippingMechanics_DisableApply_WithDiagnosis() {
+        public async Task DirectionalBacklash_WarnsWithBothFigures_ButKeepsApplyEnabled() {
+            // Transitions that cost 20' and 8' are two different quantities, not a broken
+            // measurement: withholding Apply over them also withholds the calibration
+            // factor, which they do not affect. Warn, report both, and let it through.
             var vm = Vm(new FakeRig(backlashSequence: new[] { 20.0, 8.0 }));
 
             await vm.CalibrateGearRatios(CancellationToken.None);
 
-            vm.HasCalibrationResult.Should().BeTrue("the measured values are still shown for diagnosis");
-            vm.CalibrationSlippageDetected.Should().BeTrue();
-            vm.CanApplyCalibration().Should().BeFalse("no constant compensation is valid on slipping mechanics");
-            vm.CalibrationConsistencyMessage.Should().Contain("Slippage");
-            vm.CalibrationConsistencyMessage.Should().Contain("Apply is disabled");
+            vm.HasCalibrationResult.Should().BeTrue();
+            vm.CalibrationDirectionalBacklash.Should().BeTrue();
+            vm.CanApplyCalibration().Should().BeTrue("an imperfect mean compensation is still worth applying");
+            vm.CalibrationConsistencyMessage.Should().Contain("different amount in each direction");
+            vm.CalibrationConsistencyMessage.Should().Contain("vs", "both transitions must be shown, not just their mean");
+            vm.CalibrationConsistencyMessage.Should().Contain("between calibrations",
+                "the warning has to say what would actually prove slipping mechanics");
         }
 
         [Test]
-        public async Task RepeatableMechanics_KeepApplyEnabled() {
+        public async Task SymmetricBacklash_DoesNotWarn() {
             var vm = Vm(new FakeRig(backlashSequence: new[] { 5.0 }));
 
             await vm.CalibrateGearRatios(CancellationToken.None);
 
             vm.HasCalibrationResult.Should().BeTrue();
-            vm.CalibrationSlippageDetected.Should().BeFalse();
+            vm.CalibrationDirectionalBacklash.Should().BeFalse();
             vm.CanApplyCalibration().Should().BeTrue();
+            vm.CalibrationConsistencyMessage.Should().NotContain("different amount in each direction");
         }
 
         [Test]

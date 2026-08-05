@@ -94,7 +94,7 @@ namespace NINA.Plugins.PolarAlignment.Test {
 
             outcome.Ratio.Should().BeApproximately(400f, 20f, "a quarter of the motion means four times the factor");
             outcome.BacklashArcmin.Should().BeApproximately(20f, 2f, "backlash is physical and must not be contaminated by short legs");
-            outcome.SlippageDetected.Should().BeFalse("a repeatable backlash is calibratable");
+            outcome.DirectionalBacklash.Should().BeFalse("a play that costs the same both ways is not directional");
         }
 
         [Test]
@@ -138,10 +138,10 @@ namespace NINA.Plugins.PolarAlignment.Test {
         }
 
         [Test]
-        public async Task AsymmetricResponse_FlagsAndReportsBothRatios_WithoutFakeSlippage() {
+        public async Task AsymmetricResponse_FlagsAndReportsBothRatios_WithoutFakeBacklash() {
             // 15% direction asymmetry, zero backlash: the flag must fire with both ratios
             // reported, the single model ratio is the mean, and the asymmetry must not
-            // leak into the backlash or trip the slippage detector.
+            // leak into the backlash or trip the directionality verdict.
             var axis = new RobustFakeAxis(forwardScale: 1.0, reverseScale: 0.85);
 
             var outcome = await Calibrate(axis);
@@ -151,7 +151,7 @@ namespace NINA.Plugins.PolarAlignment.Test {
             outcome.ReverseRatio.Should().BeApproximately(117.6f, 6f);
             outcome.Ratio.Should().BeApproximately(108.1f, 5f);
             outcome.BacklashArcmin.Should().BeLessThan(1f);
-            outcome.SlippageDetected.Should().BeFalse("asymmetry is not slippage");
+            outcome.DirectionalBacklash.Should().BeFalse("a response asymmetry is not a backlash asymmetry");
         }
 
         [Test]
@@ -164,25 +164,31 @@ namespace NINA.Plugins.PolarAlignment.Test {
         }
 
         [Test]
-        public async Task NonRepeatableBacklash_IsDetectedAsSlippage() {
-            // The two transitions lose very different amounts (grub screw / belt slip):
-            // that mechanics cannot be compensated by a constant, so the verdict must be
-            // slippage rather than a meaningless average silently applied.
+        public async Task TransitionsThatCostDifferently_AreFlaggedAsDirectional_AndBothAreReported() {
+            // An axis loaded by gravity crosses its own play unaided one way and has to be
+            // driven across it the other, so the two transitions legitimately differ. The
+            // mean is inexact for both directions, so the caller needs the two figures, not
+            // only the flag.
             var axis = new RobustFakeAxis(forwardScale: 1.0, backlashSequence: new[] { 20.0, 8.0 });
 
             var outcome = await Calibrate(axis);
 
-            outcome.SlippageDetected.Should().BeTrue();
+            outcome.DirectionalBacklash.Should().BeTrue();
+            outcome.BacklashEnteringReverseArcmin.Should().BeApproximately(20f, 2f);
+            outcome.BacklashEnteringForwardArcmin.Should().BeApproximately(8f, 2f);
+            outcome.BacklashArcmin.Should().BeApproximately(14f, 2f, "the applied value is still their mean");
         }
 
         [Test]
-        public async Task RepeatableBacklash_IsNotSlippage() {
+        public async Task TransitionsThatCostTheSame_AreNotDirectional() {
             var axis = new RobustFakeAxis(forwardScale: 1.0, backlashSequence: new[] { 12.0 });
 
             var outcome = await Calibrate(axis);
 
-            outcome.SlippageDetected.Should().BeFalse();
+            outcome.DirectionalBacklash.Should().BeFalse();
             outcome.BacklashArcmin.Should().BeApproximately(12f, 1f);
+            outcome.BacklashEnteringReverseArcmin.Should().BeApproximately(
+                outcome.BacklashEnteringForwardArcmin, 2f, "a symmetric mechanism reports the same both ways");
         }
 
         [Test]

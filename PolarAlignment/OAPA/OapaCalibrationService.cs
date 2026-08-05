@@ -25,7 +25,9 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
         public float NoiseSigmaArcmin { get; init; }
         public float ForwardRatio { get; init; }
         public float ReverseRatio { get; init; }
-        public bool SlippageDetected { get; init; }
+        public float BacklashEnteringReverseArcmin { get; init; }
+        public float BacklashEnteringForwardArcmin { get; init; }
+        public bool DirectionalBacklash { get; init; }
         /// <summary>True when the Reverse flag had to be flipped (and the flip verified) to obtain a consistent result.</summary>
         public bool Flipped { get; init; }
     }
@@ -42,7 +44,7 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
     ///  S2 clean forward legs (post-engagement, backlash-free) -> forward response;
     ///  S3 backlash leg, escalated until the shortfall is a minority of the leg;
     ///  S4 clean reverse legs -> reverse response, asymmetry flag;
-    ///  S5 opposite transition -> second backlash measure, slippage verdict;
+    ///  S5 opposite transition -> second backlash measure, directionality verdict;
     ///  S6 iterative close of the loop against the baseline solve.
     /// On failure or cancellation the restore is measured against the baseline too,
     /// falling back to the commanded sum only when solving is unavailable.
@@ -73,10 +75,10 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
         ///
         /// A high-friction axis keeps relaxing after the controller reports idle - one
         /// tester watched the position creep for about a second after every stop. Capturing
-        /// into that relaxation measures a moving target: the response reads short, the two
-        /// backlash transitions disagree, and the slippage detector then blocks a
-        /// calibration that was never measurable in the first place. The correction loop has
-        /// waited between move and solve since it existed; the calibration never did.
+        /// into that relaxation measures a moving target: the response reads short and the
+        /// two backlash transitions disagree for a reason that has nothing to do with the
+        /// mechanism. The correction loop has waited between move and solve since it
+        /// existed; the calibration never did.
         /// </summary>
         private async Task MoveAndSettle(Axis axis, float arcmin, CancellationToken token) {
             await motion.MoveRelative(axis, arcmin, token).ConfigureAwait(false);
@@ -120,7 +122,9 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
             NoiseSigmaArcmin = r.NoiseSigmaArcmin,
             ForwardRatio = r.ForwardRatio,
             ReverseRatio = r.ReverseRatio,
-            SlippageDetected = r.SlippageDetected,
+            BacklashEnteringReverseArcmin = r.BacklashEnteringReverseArcmin,
+            BacklashEnteringForwardArcmin = r.BacklashEnteringForwardArcmin,
+            DirectionalBacklash = r.DirectionalBacklash,
             Flipped = flipped
         };
 
@@ -250,18 +254,21 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
                 // not masquerade as backlash (or as slippage).
                 var backlashForward = Math.Max(0, backlashLeg * reverseResponse - reversalTravel);
 
-                // S5: opposite transition for the repeatability verdict.
-                reportStatus?.Invoke($"{axisLabel}: verifying backlash repeatability...");
+                // S5: opposite transition. This is a *second quantity*, not a second sample
+                // of the first: the two are equal only on a mechanism whose play costs the
+                // same to cross both ways, which an axis carrying its load against gravity
+                // is not. Their disagreement is therefore a directionality verdict.
+                reportStatus?.Invoke($"{axisLabel}: measuring the opposite transition...");
                 var dBack = await MoveAndMeasure(backlashLeg, +1f).ConfigureAwait(false);
                 var backlashReverse = Math.Max(0, backlashLeg * forwardResponse - Math.Abs(dBack));
 
                 double backlash;
-                var slippage = false;
+                var directional = false;
                 var significant = Math.Max(backlashForward, backlashReverse);
                 if (significant < 2 * threshold) {
                     backlash = 0; // both transitions indistinguishable from noise
                 } else {
-                    slippage = Math.Abs(backlashForward - backlashReverse) > Math.Max(SlippageRelativeThreshold * significant, 2 * threshold);
+                    directional = Math.Abs(backlashForward - backlashReverse) > Math.Max(DirectionalRelativeThreshold * significant, 2 * threshold);
                     backlash = (backlashForward + backlashReverse) / 2.0;
                 }
 
@@ -276,12 +283,14 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
                     NoiseSigmaArcmin = (float)noise,
                     Consistent = directionConsistent,
                     Asymmetric = asymmetric,
-                    SlippageDetected = slippage
+                    BacklashEnteringReverseArcmin = (float)backlashForward,
+                    BacklashEnteringForwardArcmin = (float)backlashReverse,
+                    DirectionalBacklash = directional
                 };
 
                 Logger.Info($"OAPA cal {axisLabel}: noise={noise:F2}', responses fwd={forwardResponse:F3}/rev={reverseResponse:F3} '/unit, " +
                     $"backlash={backlashForward:F2}'/{backlashReverse:F2}' -> {backlash:F2}', ratio={result.Ratio:F2}, " +
-                    $"consistent={result.Consistent}, asymmetric={result.Asymmetric}, slippage={result.SlippageDetected}, solves={solveCount}");
+                    $"consistent={result.Consistent}, asymmetric={result.Asymmetric}, directional={result.DirectionalBacklash}, solves={solveCount}");
 
                 // S6: physically return to the baseline. The response just measured makes
                 // the closing moves exact; iterating covers the backlash a closing reversal
@@ -380,8 +389,8 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
         private const int MaxBacklashEscalations = 3;
         /// <summary>Forward/reverse response disagreement above which the axis is flagged asymmetric.</summary>
         private const double AsymmetryFlagThreshold = 0.10;
-        /// <summary>Backlash-transition disagreement share above which the mechanics are declared non-repeatable.</summary>
-        private const double SlippageRelativeThreshold = 0.20;
+        /// <summary>Backlash-transition disagreement share above which the play is declared direction-dependent.</summary>
+        private const double DirectionalRelativeThreshold = 0.20;
         /// <summary>Hard solve budget per axis pass; exceeded means something is off and the sequence aborts honestly.</summary>
         private const int MaxSolvesPerAxis = 20;
         /// <summary>Physical cap for a single escalated leg, in axis arcminutes (sky excursion guard).</summary>

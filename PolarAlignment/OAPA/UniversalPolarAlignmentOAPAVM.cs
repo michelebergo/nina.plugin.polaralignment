@@ -543,11 +543,12 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
         [ObservableProperty]
         private string calibrationConsistencyMessage = string.Empty;
 
-        // Slipping mechanics have no valid constant compensation: the measured values stay
-        // visible for diagnosis, but applying them is blocked.
+        // Backlash that costs a different amount in each direction. Reported so the extra
+        // convergence cycles are expected rather than mysterious; it does not gate Apply,
+        // because the mean compensation is imperfect, not invalid - and the calibration
+        // factor, which is the more valuable half of the result, is unaffected by it.
         [ObservableProperty]
-        [NotifyCanExecuteChangedFor(nameof(ApplyCalibrationCommand))]
-        private bool calibrationSlippageDetected;
+        private bool calibrationDirectionalBacklash;
 
         // Armed by the first Apply when manual values would be replaced; the second Apply
         // confirms. Disarmed by Discard and by starting a new calibration.
@@ -561,7 +562,7 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
         /// </summary>
         public string ApplyButtonText => ApplyConfirmationPending ? "Apply again to confirm" : "Apply";
 
-        public bool CanApplyCalibration() => HasCalibrationResult && !CalibrationSlippageDetected;
+        public bool CanApplyCalibration() => HasCalibrationResult;
 
         public bool CanCalibrate() => Connected && IsNotMoving && !CalibrationRunning && CameraIsFree();
 
@@ -601,7 +602,7 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
                         IsNotMoving = false;
                         CalibrationRunning = true;
                         HasCalibrationResult = false;
-                        CalibrationSlippageDetected = false;
+                        CalibrationDirectionalBacklash = false;
                         ApplyConfirmationPending = false;
                         CalibrationStatus = "Starting calibration...";
                         CalibrationConsistencyMessage = string.Empty;
@@ -643,10 +644,12 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
                         if (y.Asymmetric) { details.Add($"Y forward {y.ForwardRatio:F1} / reverse {y.ReverseRatio:F1}"); }
                         consistencyMsg += $" \u26a0 The axis responds differently per direction ({string.Join("; ", details)}). The applied factor is the mean; convergence may take a few extra cycles.";
                     }
-                    var slippage = x.SlippageDetected || y.SlippageDetected;
-                    if (slippage) {
-                        var axes = x.SlippageDetected && y.SlippageDetected ? "X and Y" : (x.SlippageDetected ? "X" : "Y");
-                        consistencyMsg += $" \u26a0 Slippage detected on {axes}: the backlash is not repeatable, so no constant compensation is valid. Apply is disabled - check grub screws, belt tension and friction, then re-run the calibration.";
+                    var directional = x.DirectionalBacklash || y.DirectionalBacklash;
+                    if (directional) {
+                        var details = new List<string>();
+                        if (x.DirectionalBacklash) { details.Add($"X {x.BacklashEnteringReverseArcmin:F1}' vs {x.BacklashEnteringForwardArcmin:F1}'"); }
+                        if (y.DirectionalBacklash) { details.Add($"Y {y.BacklashEnteringReverseArcmin:F1}' vs {y.BacklashEnteringForwardArcmin:F1}'"); }
+                        consistencyMsg += $" \u26a0 The backlash costs a different amount in each direction ({string.Join("; ", details)}), which is normal on an axis loaded by gravity. The applied value is the mean, so each reversal keeps a residual and the fine phase needs extra cycles. If the two figures also change between calibrations, the mechanics are slipping: check grub screws, belt tension and friction.";
                     }
 
                     await RunOnUi(() => {
@@ -656,7 +659,7 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
                         DiscoveredYBacklash = y.BacklashArcmin;
                         DiscoveredXNoise = x.NoiseSigmaArcmin;
                         DiscoveredYNoise = y.NoiseSigmaArcmin;
-                        CalibrationSlippageDetected = slippage;
+                        CalibrationDirectionalBacklash = directional;
                         CalibrationConsistencyMessage = consistencyMsg;
                         CalibrationStatus = $"Done. X={x.Ratio:F2}, Y={y.Ratio:F2}, backlash X={x.BacklashArcmin:F2}', Y={y.BacklashArcmin:F2}'";
                         HasCalibrationResult = true;

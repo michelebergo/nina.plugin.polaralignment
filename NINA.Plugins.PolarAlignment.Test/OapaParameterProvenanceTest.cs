@@ -203,7 +203,7 @@ namespace NINA.Plugins.PolarAlignment.Test {
             vm.DiscoveredXNoise = 0.05f;
             vm.DiscoveredYNoise = 0.05f;
             vm.HasCalibrationResult = true;
-            vm.CalibrationSlippageDetected = false;
+            vm.CalibrationDirectionalBacklash = false;
         }
     }
 }

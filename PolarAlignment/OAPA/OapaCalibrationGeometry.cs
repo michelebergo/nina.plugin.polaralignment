@@ -37,12 +37,28 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
         /// <summary>Calibration factor measured from the clean reverse legs alone (reported when <see cref="Asymmetric"/>).</summary>
         public float ReverseRatio { get; init; }
 
+        /// <summary>Lost motion measured on the forward-to-reverse transition (S3), in axis arcminutes.</summary>
+        public float BacklashEnteringReverseArcmin { get; init; }
+
+        /// <summary>Lost motion measured on the reverse-to-forward transition (S5), in axis arcminutes.</summary>
+        public float BacklashEnteringForwardArcmin { get; init; }
+
         /// <summary>
-        /// True when the two backlash transitions disagree beyond noise and tolerance: the
-        /// mechanics are not repeatable (slipping clutch/belt), so no constant compensation
-        /// is valid and the result must not be applied.
+        /// True when the two backlash transitions disagree beyond noise and tolerance.
+        ///
+        /// They are two distinct physical quantities, not two samples of one: an axis loaded
+        /// by gravity crosses its own play unaided going down and has to be driven across it
+        /// going up, so the two can legitimately differ several-fold and still be perfectly
+        /// repeatable (field evidence: 53.4'/16.2' and 59.9'/15.9' on two consecutive runs of
+        /// the same axis). Their disagreement therefore says the backlash is *directional*,
+        /// which is compensable; it says nothing about repeatability, which would need the
+        /// same transition measured twice.
+        ///
+        /// <see cref="BacklashArcmin"/> is their mean, so it is inexact for both directions:
+        /// a reversal keeps a residual of about half their difference. That costs extra
+        /// convergence cycles, which is a warning, not a reason to withhold the result.
         /// </summary>
-        public bool SlippageDetected { get; init; }
+        public bool DirectionalBacklash { get; init; }
     }
 
     /// <summary>
