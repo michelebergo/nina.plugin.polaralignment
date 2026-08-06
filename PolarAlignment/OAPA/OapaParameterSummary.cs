@@ -1,3 +1,4 @@
+using System;
 using System.Globalization;
 
 namespace NINA.Plugins.PolarAlignment.OAPA {
@@ -9,11 +10,21 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
     /// </summary>
     public static class OapaParameterSummary {
 
-        public static string ForAxis(string axisLabel, double gearRatio, double backlashArcmin, string backlashMode, double speed) {
+        public static string ForAxis(string axisLabel, double gearRatio, double backlashArcmin, string backlashMode, double speed,
+            double backlashNegativeArcmin = double.NaN, int microsteps = 0) {
+
             var c = CultureInfo.InvariantCulture;
+            // Both directions are logged: on a directional axis one figure alone reads as
+            // the whole story and the arithmetic of the $J= lines below will not add up.
+            var backlash = double.IsNaN(backlashNegativeArcmin) || Math.Abs(backlashNegativeArcmin - backlashArcmin) < 0.005
+                ? $"backlash {backlashArcmin.ToString("0.##", c)}'"
+                : $"backlash +{backlashArcmin.ToString("0.##", c)}'/-{backlashNegativeArcmin.ToString("0.##", c)}'";
             var line = $"OAPA {axisLabel}: {gearRatio.ToString("0.##", c)} steps/arcmin, " +
-                       $"backlash {backlashArcmin.ToString("0.##", c)}', mode {backlashMode}, " +
+                       $"{backlash}, mode {backlashMode}, " +
                        $"speed {speed.ToString("0.##", c)} steps/s";
+            if (microsteps > 0) {
+                line += $", {microsteps} microsteps";
+            }
 
             // A factor of 1 is the factory default: the platform has never been calibrated,
             // and inventing a reading from it would be worse than showing none (matches

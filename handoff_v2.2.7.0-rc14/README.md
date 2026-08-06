@@ -1,6 +1,6 @@
 # OAPA Beta — v2.2.7.0-rc14
 
-**A backlash that costs a different amount in each direction no longer blocks Apply.** If your calibration has been ending with a slippage warning and a greyed-out Apply, this is the build to retry on — and the reason is probably not what the old message told you. **Please don't redistribute firmware or plugin — still in beta.**
+**A backlash that costs a different amount in each direction is now compensated per direction — and no longer blocks Apply.** Plus **microstepping is settable per axis**, which is the cheapest speed you can buy on a high-reduction platform. If your calibration has been ending with a slippage warning and a greyed-out Apply, this is the build to retry on — and the reason is probably not what the old message told you. **Please don't redistribute firmware or plugin — still in beta.**
 
 > **Firmware unchanged (1.2.2)** — nothing to reflash. Everything in rc13, rc13.1 and rc13.2 is still here.
 
@@ -23,11 +23,13 @@ The field evidence is unambiguous. One tester's altitude axis, calibrated twice 
 
 Three and a half times apart from each other — and each one repeating to within a few percent. A slipping clutch does not repeat to 2%. That rig was told its mechanics were unrepeatable, and its owner had to type every value in by hand, which meant losing the automatic mode selection and the overwrite protection that come with Apply.
 
-### What the calibration says now
+### What the calibration does now
 
-The disagreement is reported as **direction-dependent backlash**, with both figures shown, and **Apply stays enabled**.
+Both figures are kept, applied and used. Each axis has a **Backlash +** and a **Backlash -** field, and every compensation move is planned with the play of the direction *that move travels*. Apply is no longer blocked.
 
-Being honest about what this does and does not fix: the applied value is still the average of the two, so it is inexact for both directions. Every reversal keeps a residual, and the fine phase will need a few extra cycles. That is an imperfect compensation, not an invalid one — and it never justified withholding the **calibration factor**, which is the more valuable half of the result and is not affected by the backlash at all.
+That is what makes the arrival exact on a directional axis, and it is worth seeing why. A Unidirectional plan overshoots past the target and comes back, so it pays one transition on the way out and the other on the way back. Those two cancel only if each leg is given its own number. With a single averaged value they do not cancel: the residual left behind is the entire spread between the two figures — about **39 arcminutes per reversal** on the rig above. The correction loop then had to chase that residual, which usually meant reversing again, and paying it again. That is the bouncing several of you have described in the fine phase, and it was not only the excursion time.
+
+Equal values mean a symmetric axis and behave exactly as a single value did.
 
 ### How to tell directional backlash from real slipping
 
@@ -42,9 +44,18 @@ The warning on screen now says this too.
 
 ### One correction to earlier advice
 
-The FAQ used to say that Unidirectional mode keeps the play out of the loop entirely, whatever its value. That is true only when the two reversals cost the same. Its two legs pay one transition each, and those cancel only if they are equal — on a strongly directional axis a residual is left behind, roughly half the difference between the two figures. Unidirectional is still the better choice for a large backlash; it just is not immune. The FAQ has been corrected.
+The FAQ used to say that Unidirectional mode keeps the play out of the loop entirely, whatever its value. That was true only when the two reversals cost the same — which is exactly the assumption this release removes. The FAQ has been corrected.
 
-A future build will keep the two values separate and let each leg compensate its own direction, which removes the residual on both Unidirectional and Full. This build does not do that yet.
+### Microstepping, per axis
+
+New in the Motor Settings, and the cheapest speed available on a high-reduction platform.
+
+Steps per arcminute scale exactly with the microstep setting, so going from 16 to 4 makes an axis **four times faster at the same step rate** — and gives back torque, because microstepping trades torque for smoothness. A platform at 1000 steps per arcminute drops to 250, which is still two orders of magnitude finer than a plate solve can measure. On the rig in the example above that turns a 29-second backlash excursion into about 7 seconds.
+
+Two things happen automatically, and both matter:
+
+- The **calibration factor is rescaled** when you change the setting. Leaving a stale factor behind would make every commanded move wrong by that same ratio, and on a short-travel platform the first move would drive an axis into its end stop. Re-run the Self-Calibration afterwards anyway to confirm.
+- The setting is **re-sent on every connection**, because the controller forgets it at power-off and would otherwise fall back to its own default with your factor still scaled for something else.
 
 ## Install / update
 
@@ -59,16 +70,15 @@ A future build will keep the two values separate and let each leg compensate its
 
 ## Test plan
 
-1. **If Apply has been greyed out on your rig, run the self-calibration and apply it.** That is the whole point of this build. Tell me what the two backlash figures were.
+1. **If Apply has been greyed out on your rig, run the self-calibration and apply it.** Tell me what the two backlash figures were.
 2. **Run the calibration a second time** and send me both sets of figures. That comparison is the only thing that can separate a directional axis from a slipping one, and I would like the data from several rigs.
-3. If your axis is directional, expect the fine phase to bounce and to need extra cycles. Time it if you can — how long from the start of the correction phase to the tolerance being reached.
-4. Compare backlash modes on a directional axis if you have the patience: **Unidirectional** and **Full** fail differently there, and I am interested in which one you find less annoying in practice.
+3. **Time the correction phase**, start to tolerance, and compare it with what you were getting on rc13.2. If your axis is directional this is where the change should show, and I want to know whether it does.
+4. **If your platform is slow, try dropping the microstepping** — 16 to 8, or 16 to 4 — then re-run the Self-Calibration and time a run again. Tell me the before and after, and whether the motion feels stronger or rougher.
 5. Everything from the rc13, rc13.1 and rc13.2 test plans still applies.
 
 ## Known and being worked on
 
-- Per-direction backlash compensation (removes the residual described above) — designed, not in this build.
 - The calibration does not know your platform's travel limits, so an escalating measurement leg can run an axis into its end stop. Keep the STOP button in reach during a calibration on a short-travel platform.
-- Microstepping is not exposed by the plugin yet. On a very high-reduction axis, lowering it in the firmware is still the single biggest speed win available.
+- The two backlash figures are measured once each per calibration, so a single run still cannot prove repeatability. Running it twice is the workaround; making the calibration do that itself costs sky time and is not decided yet.
 
 Clear skies!

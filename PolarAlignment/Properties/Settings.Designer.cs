@@ -658,5 +658,53 @@ namespace NINA.Plugins.PolarAlignment.Properties {
                 this["OAPAYHoldPercent"] = value;
             }
         }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("16")]
+        public int OAPAXMicrosteps {
+            get {
+                return ((int)(this["OAPAXMicrosteps"]));
+            }
+            set {
+                this["OAPAXMicrosteps"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("16")]
+        public int OAPAYMicrosteps {
+            get {
+                return ((int)(this["OAPAYMicrosteps"]));
+            }
+            set {
+                this["OAPAYMicrosteps"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("-1")]
+        public float OAPAXBacklashCompensationNegative {
+            get {
+                return ((float)(this["OAPAXBacklashCompensationNegative"]));
+            }
+            set {
+                this["OAPAXBacklashCompensationNegative"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("-1")]
+        public float OAPAYBacklashCompensationNegative {
+            get {
+                return ((float)(this["OAPAYBacklashCompensationNegative"]));
+            }
+            set {
+                this["OAPAYBacklashCompensationNegative"] = value;
+            }
+        }
     }
 }

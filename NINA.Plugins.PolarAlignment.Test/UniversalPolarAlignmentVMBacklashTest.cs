@@ -62,6 +62,10 @@ namespace NINA.Plugins.PolarAlignment.Test {
             vm.ReverseAltitude = false;
             vm.XBacklashCompensation = xCompensation;
             vm.YBacklashCompensation = yCompensation;
+            // Symmetric by construction: the setting is process-global, so leaving the
+            // negative direction unset would let another test's value decide these plans.
+            vm.XBacklashCompensationNegative = xCompensation;
+            vm.YBacklashCompensationNegative = yCompensation;
             vm.XBacklashMode = OapaBacklashMode.Full;
             vm.YBacklashMode = OapaBacklashMode.Full;
             return (vm, system);

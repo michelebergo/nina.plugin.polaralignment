@@ -67,6 +67,10 @@ namespace NINA.Plugins.PolarAlignment.Test {
             vm.upa = system;
             vm.ReverseAzimuth = false;
             vm.XBacklashCompensation = 5f;
+            // Symmetric by construction: these tests compare the shared clearing sequence
+            // against the OAPA plan, not direction-dependent play, and the setting is
+            // process-global so a value left by another test would leak in.
+            if (vm is UniversalPolarAlignmentOAPAVM oapa) { oapa.XBacklashCompensationNegative = 5f; }
             return (vm, system);
         }
 

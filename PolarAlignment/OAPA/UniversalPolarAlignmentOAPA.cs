@@ -79,7 +79,8 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
             var settings = Properties.Settings.Default;
             foreach (var command in OapaDriverCommands.StartupBatch(
                 settings.OAPAXRunCurrent, settings.OAPAXHoldPercent,
-                settings.OAPAYRunCurrent, settings.OAPAYHoldPercent)) {
+                settings.OAPAYRunCurrent, settings.OAPAYHoldPercent,
+                settings.OAPAXMicrosteps, settings.OAPAYMicrosteps)) {
                 SendDriverCommand(command, "apply stored driver configuration");
             }
 
@@ -88,10 +89,19 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
             // that follow can be read back as arcminutes without guessing the ratio.
             Logger.Info(OapaParameterSummary.ForAxis("X (Azimuth)",
                 settings.OAPAXGearRatio, settings.OAPAXBacklashCompensation,
-                settings.OAPAXBacklashMode, settings.OAPAXSpeed));
+                settings.OAPAXBacklashMode, settings.OAPAXSpeed,
+                NegativeOrSame(settings.OAPAXBacklashCompensationNegative, settings.OAPAXBacklashCompensation),
+                settings.OAPAXMicrosteps));
             Logger.Info(OapaParameterSummary.ForAxis("Y (Altitude)",
                 settings.OAPAYGearRatio, settings.OAPAYBacklashCompensation,
-                settings.OAPAYBacklashMode, settings.OAPAYSpeed));
+                settings.OAPAYBacklashMode, settings.OAPAYSpeed,
+                NegativeOrSame(settings.OAPAYBacklashCompensationNegative, settings.OAPAYBacklashCompensation),
+                settings.OAPAYMicrosteps));
+        }
+
+        /// <summary>A stored value below zero means "never set": the axis is symmetric.</summary>
+        private static float NegativeOrSame(float stored, float positive) {
+            return stored < 0f ? positive : stored;
         }
 
         private void SendDriverCommand(string command, string what) {
@@ -132,6 +142,10 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
 
         public void SetYHoldPercent(int percent) {
             SendDriverCommand(OapaDriverCommands.HoldPercent(Axis.YAxis, percent), "set Y hold percent");
+        }
+
+        public void SetMicrosteps(Axis axis, int microsteps) {
+            SendDriverCommand(OapaDriverCommands.Microsteps(axis, microsteps), $"set {axis} microsteps");
         }
 
         [GeneratedRegex(@"<(?<status>\w+)\|MPos:(?<x>[+-]?\d+(\.\d+)?),(?<y>[+-]?\d+(\.\d+)?),(?<z>[+-]?\d+(\.\d+)?)(?:\|T:(?<target>[+-]?\d+),R:(?<running>[01]),E:(?<endstop>[01]),S:(?<speed>[+-]?\d+(\.\d+)?))?(?:\|V:(?<version>\d+(?:\.\d+){0,2}))?\|>")]

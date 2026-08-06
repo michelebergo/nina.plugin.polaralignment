@@ -135,8 +135,17 @@ namespace NINA.Plugins.PolarAlignment.Test {
         }
 
         [Test]
+        public void Microsteps_ReachTheDriverConfigHandler_ForBothAxes() {
+            foreach (var (axis, letter) in new[] { (Axis.XAxis, 'X'), (Axis.YAxis, 'Y') }) {
+                var command = OapaDriverCommands.Microsteps(axis, 4);
+                FirmwareDispatcher.Route(command).Should().Be(Handler.DriverConfig, because: $"the {letter} microstep command must reach handleDriverConfig");
+                FirmwareDispatcher.ParseDriverConfig(command).Should().Be((letter, 4));
+            }
+        }
+
+        [Test]
         public void StartupBatch_IsFullyRecognized() {
-            foreach (var command in OapaDriverCommands.StartupBatch(600, 50, 700, 40)) {
+            foreach (var command in OapaDriverCommands.StartupBatch(600, 50, 700, 40, 16, 4)) {
                 FirmwareDispatcher.Route(command).Should().Be(Handler.DriverConfig, because: $"'{command}' is pushed on connect and must not be silently ignored");
             }
         }

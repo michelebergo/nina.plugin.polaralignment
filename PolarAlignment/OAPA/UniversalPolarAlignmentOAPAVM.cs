@@ -269,6 +269,96 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
             RaisePropertyChanged(nameof(YBacklashSourceLabel));
         }
 
+        // ----- Per-direction backlash -----
+        // Entering one direction and entering the other are two different physical
+        // quantities on an axis loaded by gravity. The pair above holds the positive
+        // direction; these hold the negative one, and a stored value below zero means
+        // "never set" so an axis configured before this existed stays symmetric instead of
+        // silently acquiring a zero compensation one way.
+
+        public float XBacklashCompensationNegative {
+            get {
+                var stored = Properties.Settings.Default.OAPAXBacklashCompensationNegative;
+                return stored < 0f ? XBacklashCompensation : stored;
+            }
+            set => SetXBacklashNegative(value, MarkEdit(value, XBacklashCompensationNegative, XBacklashSource));
+        }
+
+        private void SetXBacklashNegative(float value, OapaParameterSource source) {
+            value = System.Math.Clamp(value, 0f, MaximumBacklashArcmin);
+            Properties.Settings.Default.OAPAXBacklashCompensationNegative = value;
+            Properties.Settings.Default.OAPAXBacklashSource = source.ToString();
+            CoreUtil.SaveSettings(Properties.Settings.Default);
+            RaisePropertyChanged(nameof(XBacklashCompensationNegative));
+            RaisePropertyChanged(nameof(XBacklashSourceLabel));
+        }
+
+        public float YBacklashCompensationNegative {
+            get {
+                var stored = Properties.Settings.Default.OAPAYBacklashCompensationNegative;
+                return stored < 0f ? YBacklashCompensation : stored;
+            }
+            set => SetYBacklashNegative(value, MarkEdit(value, YBacklashCompensationNegative, YBacklashSource));
+        }
+
+        private void SetYBacklashNegative(float value, OapaParameterSource source) {
+            value = System.Math.Clamp(value, 0f, MaximumBacklashArcmin);
+            Properties.Settings.Default.OAPAYBacklashCompensationNegative = value;
+            Properties.Settings.Default.OAPAYBacklashSource = source.ToString();
+            CoreUtil.SaveSettings(Properties.Settings.Default);
+            RaisePropertyChanged(nameof(YBacklashCompensationNegative));
+            RaisePropertyChanged(nameof(YBacklashSourceLabel));
+        }
+
+        // ----- Microstepping -----
+        // Trades resolution for speed and torque, and polar alignment has resolution to
+        // spare: a platform at 1000 steps per arcminute is two orders of magnitude past
+        // what the plate solve can resolve, and pays for it at 3 arcmin/s.
+        //
+        // Steps per arcminute scale exactly with the microstep setting, so changing it
+        // invalidates the calibration factor by a known factor. Rescaling it here is not a
+        // convenience: leaving a stale factor behind would make every commanded move wrong
+        // by that same ratio, and on a short-travel platform the first move would drive an
+        // axis into its end stop. The backlash is in physical arcminutes and does not scale.
+
+        /// <summary>Instance property on purpose: a XAML {Binding} cannot resolve a static one.</summary>
+        public int[] MicrostepOptions => SupportedMicrosteps;
+
+        private static readonly int[] SupportedMicrosteps = { 1, 2, 4, 8, 16, 32, 64, 128, 256 };
+
+        public int XMicrosteps {
+            get => Properties.Settings.Default.OAPAXMicrosteps;
+            set => SetMicrosteps(Axis.XAxis, value);
+        }
+
+        public int YMicrosteps {
+            get => Properties.Settings.Default.OAPAYMicrosteps;
+            set => SetMicrosteps(Axis.YAxis, value);
+        }
+
+        private void SetMicrosteps(Axis axis, int value) {
+            if (Array.IndexOf(SupportedMicrosteps, value) < 0) { return; }
+            var isX = axis == Axis.XAxis;
+            var previous = isX ? XMicrosteps : YMicrosteps;
+            if (previous == value) { return; }
+
+            if (isX) { Properties.Settings.Default.OAPAXMicrosteps = value; } else { Properties.Settings.Default.OAPAYMicrosteps = value; }
+
+            var scale = (float)value / previous;
+            var oldRatio = isX ? XGearRatio : YGearRatio;
+            var newRatio = System.Math.Clamp(oldRatio * scale, MinimumFactor, MaximumFactor);
+            if (isX) { SetXGearRatio(newRatio, XGearRatioSource); } else { SetYGearRatio(newRatio, YGearRatioSource); }
+
+            CoreUtil.SaveSettings(Properties.Settings.Default);
+            Logger.Info($"OAPA microsteps {axis}: {previous} -> {value}; calibration factor rescaled {oldRatio:F2} -> {newRatio:F2} steps/arcmin");
+            if (upa?.Connected == true && upa is UniversalPolarAlignmentOAPA oapa) {
+                oapa.SetMicrosteps(axis, value);
+            }
+
+            RaisePropertyChanged(isX ? nameof(XMicrosteps) : nameof(YMicrosteps));
+            RaisePropertyChanged(isX ? nameof(XSpeedPhysical) : nameof(YSpeedPhysical));
+        }
+
         // ----- Parameter provenance -----
         // A hand-entered value is a deliberate user decision: it is tracked as Manual and
         // Apply will not replace it without an explicit confirmation. Values written by
@@ -323,6 +413,10 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
             return axis == Axis.YAxis ? YBacklashCompensation : base.GetBacklashCompensation(axis);
         }
 
+        private float GetBacklashCompensationNegative(Axis axis) {
+            return axis == Axis.YAxis ? YBacklashCompensationNegative : XBacklashCompensationNegative;
+        }
+
         // OAPA hardware tolerates the faster profile: error-scaled probes and the 75%
         // correction candidate. UPAS and other systems keep the legacy behavior.
         public override bool AggressiveCorrectionProfile => true;
@@ -373,7 +467,8 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
         /// </summary>
         protected override async Task ExecuteRelativeMove(Axis axis, int speed, float position, CancellationToken token) {
             var mode = axis == Axis.XAxis ? XBacklashMode : YBacklashMode;
-            var plan = BacklashModePlanner.PlanMoves(mode, position, GetBacklashCompensation(axis), LastDirectionOf(axis));
+            var plan = BacklashModePlanner.PlanMoves(mode, position,
+                GetBacklashCompensation(axis), GetBacklashCompensationNegative(axis), LastDirectionOf(axis));
             if (plan.Length > 1 || System.Math.Abs(plan[0] - position) > float.Epsilon) {
                 Logger.Info($"OAPA backlash mode {mode} on {axis}: move {position:F2}' planned as [{string.Join(", ", plan)}]");
             }
@@ -526,11 +621,19 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
         [ObservableProperty]
         private float discoveredYRatio;
 
+        // The discovered backlash is per direction: these hold the positive one, the pair
+        // below the negative one. They are equal on a symmetric axis.
         [ObservableProperty]
         private float discoveredXBacklash;
 
         [ObservableProperty]
         private float discoveredYBacklash;
+
+        [ObservableProperty]
+        private float discoveredXBacklashNegative;
+
+        [ObservableProperty]
+        private float discoveredYBacklashNegative;
 
         // Solve noise measured by the calibration (S0), kept per axis so Apply can derive
         // the recommended backlash mode from backlash-vs-noise.
@@ -647,16 +750,18 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
                     var directional = x.DirectionalBacklash || y.DirectionalBacklash;
                     if (directional) {
                         var details = new List<string>();
-                        if (x.DirectionalBacklash) { details.Add($"X {x.BacklashEnteringReverseArcmin:F1}' vs {x.BacklashEnteringForwardArcmin:F1}'"); }
-                        if (y.DirectionalBacklash) { details.Add($"Y {y.BacklashEnteringReverseArcmin:F1}' vs {y.BacklashEnteringForwardArcmin:F1}'"); }
-                        consistencyMsg += $" \u26a0 The backlash costs a different amount in each direction ({string.Join("; ", details)}), which is normal on an axis loaded by gravity. The applied value is the mean, so each reversal keeps a residual and the fine phase needs extra cycles. If the two figures also change between calibrations, the mechanics are slipping: check grub screws, belt tension and friction.";
+                        if (x.DirectionalBacklash) { details.Add($"X {x.BacklashEnteringPositiveArcmin:F1}' vs {x.BacklashEnteringNegativeArcmin:F1}'"); }
+                        if (y.DirectionalBacklash) { details.Add($"Y {y.BacklashEnteringPositiveArcmin:F1}' vs {y.BacklashEnteringNegativeArcmin:F1}'"); }
+                        consistencyMsg += $" \u26a0 The backlash costs a different amount in each direction ({string.Join("; ", details)}), which is normal on an axis loaded by gravity. Each direction is compensated with its own value, so this is handled - but if the two figures also change between calibrations, the mechanics are slipping: check grub screws, belt tension and friction.";
                     }
 
                     await RunOnUi(() => {
                         DiscoveredXRatio = x.Ratio;
                         DiscoveredYRatio = y.Ratio;
-                        DiscoveredXBacklash = x.BacklashArcmin;
-                        DiscoveredYBacklash = y.BacklashArcmin;
+                        DiscoveredXBacklash = x.BacklashEnteringPositiveArcmin;
+                        DiscoveredYBacklash = y.BacklashEnteringPositiveArcmin;
+                        DiscoveredXBacklashNegative = x.BacklashEnteringNegativeArcmin;
+                        DiscoveredYBacklashNegative = y.BacklashEnteringNegativeArcmin;
                         DiscoveredXNoise = x.NoiseSigmaArcmin;
                         DiscoveredYNoise = y.NoiseSigmaArcmin;
                         CalibrationDirectionalBacklash = directional;
@@ -708,10 +813,12 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
                 SetYGearRatio(DiscoveredYRatio, OapaParameterSource.Calibrated);
                 SetXBacklash(DiscoveredXBacklash, OapaParameterSource.Calibrated);
                 SetYBacklash(DiscoveredYBacklash, OapaParameterSource.Calibrated);
+                SetXBacklashNegative(DiscoveredXBacklashNegative, OapaParameterSource.Calibrated);
+                SetYBacklashNegative(DiscoveredYBacklashNegative, OapaParameterSource.Calibrated);
                 // Applying the calibration includes picking the backlash strategy the
                 // measurements call for; the change is stated explicitly, never silent.
-                XBacklashMode = BacklashModePlanner.Recommend(DiscoveredXBacklash, DiscoveredXNoise);
-                YBacklashMode = BacklashModePlanner.Recommend(DiscoveredYBacklash, DiscoveredYNoise);
+                XBacklashMode = BacklashModePlanner.Recommend(DiscoveredXBacklash, DiscoveredXBacklashNegative, DiscoveredXNoise);
+                YBacklashMode = BacklashModePlanner.Recommend(DiscoveredYBacklash, DiscoveredYBacklashNegative, DiscoveredYNoise);
                 HasCalibrationResult = false;
                 CalibrationStatus = $"Applied. Backlash mode set to X: {XBacklashMode}, Y: {YBacklashMode} (from the measured {DiscoveredXBacklash:F1}'/{DiscoveredYBacklash:F1}')";
                 Logger.Info($"OAPA calibration applied: X={DiscoveredXRatio:F2}, Y={DiscoveredYRatio:F2}, backlash X={DiscoveredXBacklash:F2}', Y={DiscoveredYBacklash:F2}', modes X={XBacklashMode}, Y={YBacklashMode}");
@@ -728,6 +835,8 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
             DiscoveredYRatio = 0;
             DiscoveredXBacklash = 0;
             DiscoveredYBacklash = 0;
+            DiscoveredXBacklashNegative = 0;
+            DiscoveredYBacklashNegative = 0;
             HasCalibrationResult = false;
             ApplyConfirmationPending = false;
             CalibrationConsistencyMessage = string.Empty;

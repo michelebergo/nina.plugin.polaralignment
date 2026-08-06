@@ -247,6 +247,19 @@ Applying a calibration sets the recommended mode automatically. If you are choos
 
 **The calibration warns that the backlash costs a different amount in each direction**: this is normal on an axis that carries its load against gravity. Going one way the weight crosses the play on its own; going the other the motor has to drive across it. The two figures are shown so you can see the spread — 50' one way and 15' the other is not unusual on a heavy altitude axis.
 
-Apply is *not* blocked by this. The applied value is the mean of the two, which is inexact for both directions, so every reversal keeps a residual and the fine phase needs a few extra cycles; the calibration factor, the more valuable half of the result, is unaffected. What the warning cannot tell you is whether the mechanics also *slip*: for that, run the calibration twice. If each figure comes back close to its previous value the axis is simply directional; if the same figure jumps between runs, something is slipping — check grub screws, belt tension and friction with the real payload mounted.
+Both figures are measured, applied and used: each axis has a **Backlash +** and a **Backlash -** field, and every compensation move is planned with the value of the direction that move travels. That is what makes the compensation exact on a directional axis — a single averaged value would be wrong in both directions, and the residual it left behind would be the whole spread between them. Equal values mean a symmetric axis and behave exactly as one value did.
 
-If the correction loop converges nicely and then loses ground every time an axis reverses direction, that is the same problem seen from the other side. Unidirectional mode helps, though on a strongly directional axis it cannot cancel the play completely: its two legs pay one transition each, and those only cancel when the two cost the same. The mechanics are the actual fix.
+What the warning cannot tell you is whether the mechanics also *slip*: for that, run the calibration twice. If each figure comes back close to its previous value the axis is simply directional; if the same figure jumps between runs, something is slipping — check grub screws, belt tension and friction with the real payload mounted.
+
+If the correction loop converges nicely and then loses ground every time an axis reverses direction, that is the same problem seen from the other side. The mechanics are still the real fix: compensation costs travel time proportional to the play, and on a slow axis that is where the minutes go.
+
+## My platform is very slow to correct. What can I do?
+
+Time in the correction phase is mostly **travel**, and travel is the play divided by the speed. On a high-reduction platform the two multiply into minutes. In order of leverage:
+
+1. **Lower the microstepping.** Steps per arcminute scale exactly with it, so going from 16 to 4 makes the axis four times faster at the same step rate *and gives back torque* — microstepping trades torque for smoothness. A platform at 1000 steps per arcminute drops to 250, which is still two orders of magnitude finer than a plate solve can measure. Set it per axis in the Motor Settings; the calibration factor is rescaled for you, and re-running the Self-Calibration afterwards is still worth it.
+2. **Check the tolerance you are asking for.** Chasing 0.2' when 0.5' is already below what your guiding can see costs extra confirmation solves at the end of every run.
+3. **Shorten the plate solve** — exposure and search radius — once travel is no longer dominant.
+4. **Reduce the play mechanically.** A toothed belt in place of a gear stage, or a preloaded final mesh. This is the root cause; everything above works around it.
+
+Lowering the *settle time* is not on this list on purpose: it is a second or two per measurement against tens of seconds of travel, and shortening it below what your axis needs corrupts the measurement everything else depends on.

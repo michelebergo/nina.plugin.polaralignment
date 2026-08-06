@@ -26,6 +26,8 @@ namespace NINA.Plugins.PolarAlignment.Test {
             private readonly double reverseScale;
             private readonly double[] backlashSequence;
             private readonly double noiseAmplitudeArcmin;
+            /// <summary>-1 models a rig wired so the sky moves opposite the commanded sign: the case the Reverse flag exists for.</summary>
+            private readonly int physicalSign;
             private uint rng;
             private int reversals;
             private double physicalPositionArcmin;
@@ -38,11 +40,13 @@ namespace NINA.Plugins.PolarAlignment.Test {
                                   double? reverseScale = null,
                                   double[] backlashSequence = null,
                                   double noiseAmplitudeArcmin = 0,
-                                  int seed = 12345) {
+                                  int seed = 12345,
+                                  int physicalSign = 1) {
                 this.forwardScale = forwardScale;
                 this.reverseScale = reverseScale ?? forwardScale;
                 this.backlashSequence = backlashSequence ?? new[] { 0.0 };
                 this.noiseAmplitudeArcmin = noiseAmplitudeArcmin;
+                this.physicalSign = physicalSign;
                 rng = (uint)seed;
             }
 
@@ -57,7 +61,7 @@ namespace NINA.Plugins.PolarAlignment.Test {
                     effective = Math.Max(0, effective - backlash);
                 }
                 if (sign != 0) { lastSign = sign; }
-                physicalPositionArcmin += sign * effective;
+                physicalPositionArcmin += physicalSign * sign * effective;
                 return Task.CompletedTask;
             }
 
@@ -77,9 +81,9 @@ namespace NINA.Plugins.PolarAlignment.Test {
             public double PhysicalPositionArcmin => physicalPositionArcmin;
         }
 
-        private static Task<AxisCalibrationOutcome> Calibrate(RobustFakeAxis axis, float currentRatio = 100f) {
+        private static Task<AxisCalibrationOutcome> Calibrate(RobustFakeAxis axis, float currentRatio = 100f, bool reversed = false) {
             var service = new OapaCalibrationService(axis, axis);
-            return service.CalibrateAxisWithAutoReverse(Axis.YAxis, currentRatio, false, "Y", null, CancellationToken.None);
+            return service.CalibrateAxisWithAutoReverse(Axis.YAxis, currentRatio, reversed, "Y", null, CancellationToken.None);
         }
 
         [Test]
@@ -174,9 +178,36 @@ namespace NINA.Plugins.PolarAlignment.Test {
             var outcome = await Calibrate(axis);
 
             outcome.DirectionalBacklash.Should().BeTrue();
-            outcome.BacklashEnteringReverseArcmin.Should().BeApproximately(20f, 2f);
-            outcome.BacklashEnteringForwardArcmin.Should().BeApproximately(8f, 2f);
+            outcome.BacklashEnteringNegativeArcmin.Should().BeApproximately(20f, 2f, "the first reversal the sequence meets goes negative");
+            outcome.BacklashEnteringPositiveArcmin.Should().BeApproximately(8f, 2f);
             outcome.BacklashArcmin.Should().BeApproximately(14f, 2f, "the applied value is still their mean");
+        }
+
+        [Test]
+        public async Task PerDirectionBacklash_IsReportedInCommandedSign_NotInTheCalibrationsOwnLegs() {
+            // The calibration's "forward" leg is the commanded positive direction only when
+            // Reverse is off; with Reverse on it is the commanded negative one. The same
+            // mechanism must therefore report its two figures the other way round, because
+            // the planner works in commanded sign and knows nothing about Reverse.
+            //
+            // Same 20'/8' mechanism, wired so the sky moves against the commanded sign, and
+            // calibrated with Reverse already on so no auto-flip intervenes.
+            var straight = new RobustFakeAxis(forwardScale: 1.0, backlashSequence: new[] { 20.0, 8.0 });
+            var mirrored = new RobustFakeAxis(forwardScale: 1.0, backlashSequence: new[] { 20.0, 8.0 }, physicalSign: -1);
+
+            var normal = await Calibrate(straight);
+            var reversed = await Calibrate(mirrored, reversed: true);
+
+            normal.Consistent.Should().BeTrue();
+            reversed.Consistent.Should().BeTrue();
+            reversed.Flipped.Should().BeFalse("Reverse was already correct, so nothing had to be flipped");
+
+            normal.BacklashEnteringNegativeArcmin.Should().BeApproximately(20f, 2f);
+            normal.BacklashEnteringPositiveArcmin.Should().BeApproximately(8f, 2f);
+
+            reversed.BacklashEnteringPositiveArcmin.Should().BeApproximately(20f, 2f,
+                "with Reverse on, the calibration's first reversal travels the commanded positive direction");
+            reversed.BacklashEnteringNegativeArcmin.Should().BeApproximately(8f, 2f);
         }
 
         [Test]
@@ -187,8 +218,8 @@ namespace NINA.Plugins.PolarAlignment.Test {
 
             outcome.DirectionalBacklash.Should().BeFalse();
             outcome.BacklashArcmin.Should().BeApproximately(12f, 1f);
-            outcome.BacklashEnteringReverseArcmin.Should().BeApproximately(
-                outcome.BacklashEnteringForwardArcmin, 2f, "a symmetric mechanism reports the same both ways");
+            outcome.BacklashEnteringNegativeArcmin.Should().BeApproximately(
+                outcome.BacklashEnteringPositiveArcmin, 2f, "a symmetric mechanism reports the same both ways");
         }
 
         [Test]

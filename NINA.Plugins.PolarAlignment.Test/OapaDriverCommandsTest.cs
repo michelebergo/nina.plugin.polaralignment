@@ -34,9 +34,27 @@ namespace NINA.Plugins.PolarAlignment.Test {
         }
 
         [Test]
-        public void StartupBatch_SendsAllFourStoredValues_InOrder() {
-            var batch = OapaDriverCommands.StartupBatch(xRunMA: 600, xHoldPercent: 50, yRunMA: 700, yHoldPercent: 40);
-            batch.Should().Equal("CX600", "HX50", "CY700", "HY40");
+        public void Microsteps_IsTypeFirst() {
+            OapaDriverCommands.Microsteps(Axis.XAxis, 16).Should().Be("SX16");
+            OapaDriverCommands.Microsteps(Axis.YAxis, 4).Should().Be("SY4");
+        }
+
+        [Test]
+        public void StartupBatch_SendsEveryStoredValue_WithMicrostepsFirst() {
+            var batch = OapaDriverCommands.StartupBatch(
+                xRunMA: 600, xHoldPercent: 50, yRunMA: 700, yHoldPercent: 40,
+                xMicrosteps: 16, yMicrosteps: 4);
+
+            // Microstepping changes what a step means, so it must be set before anything can move.
+            batch.Should().Equal("SX16", "SY4", "CX600", "HX50", "CY700", "HY40");
+        }
+
+        [Test]
+        public void StartupBatch_CarriesMicrosteps_BecauseTheControllerForgetsThemAtPowerOff() {
+            var batch = OapaDriverCommands.StartupBatch(600, 50, 700, 40, 4, 8);
+
+            batch.Should().Contain("SX4").And.Contain("SY8",
+                because: "a microstep setting lost at power-off leaves every commanded move wrong by that ratio");
         }
     }
 }

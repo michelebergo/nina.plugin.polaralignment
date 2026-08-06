@@ -50,6 +50,9 @@ namespace NINA.Plugins.PolarAlignment.Test {
             vm.upa = system;
             vm.ReverseAltitude = false;
             vm.YBacklashCompensation = yCompensation;
+            // Symmetric by construction: these tests are about the modes, not about
+            // direction-dependent play, and the setting is process-global.
+            vm.YBacklashCompensationNegative = yCompensation;
             vm.YBacklashMode = yMode;
             return (vm, system);
         }

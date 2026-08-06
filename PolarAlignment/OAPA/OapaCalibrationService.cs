@@ -25,8 +25,8 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
         public float NoiseSigmaArcmin { get; init; }
         public float ForwardRatio { get; init; }
         public float ReverseRatio { get; init; }
-        public float BacklashEnteringReverseArcmin { get; init; }
-        public float BacklashEnteringForwardArcmin { get; init; }
+        public float BacklashEnteringPositiveArcmin { get; init; }
+        public float BacklashEnteringNegativeArcmin { get; init; }
         public bool DirectionalBacklash { get; init; }
         /// <summary>True when the Reverse flag had to be flipped (and the flip verified) to obtain a consistent result.</summary>
         public bool Flipped { get; init; }
@@ -122,8 +122,8 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
             NoiseSigmaArcmin = r.NoiseSigmaArcmin,
             ForwardRatio = r.ForwardRatio,
             ReverseRatio = r.ReverseRatio,
-            BacklashEnteringReverseArcmin = r.BacklashEnteringReverseArcmin,
-            BacklashEnteringForwardArcmin = r.BacklashEnteringForwardArcmin,
+            BacklashEnteringPositiveArcmin = r.BacklashEnteringPositiveArcmin,
+            BacklashEnteringNegativeArcmin = r.BacklashEnteringNegativeArcmin,
             DirectionalBacklash = r.DirectionalBacklash,
             Flipped = flipped
         };
@@ -283,8 +283,12 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
                     NoiseSigmaArcmin = (float)noise,
                     Consistent = directionConsistent,
                     Asymmetric = asymmetric,
-                    BacklashEnteringReverseArcmin = (float)backlashForward,
-                    BacklashEnteringForwardArcmin = (float)backlashReverse,
+                    // backlashForward was measured entering the leg direction -dirSign (S3),
+                    // backlashReverse entering +dirSign (S5). The Reverse flag therefore
+                    // swaps which one belongs to which commanded sign; resolving it here
+                    // means no consumer has to know about dirSign at all.
+                    BacklashEnteringPositiveArcmin = (float)(dirSign > 0 ? backlashReverse : backlashForward),
+                    BacklashEnteringNegativeArcmin = (float)(dirSign > 0 ? backlashForward : backlashReverse),
                     DirectionalBacklash = directional
                 };
 

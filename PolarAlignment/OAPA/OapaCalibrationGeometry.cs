@@ -37,11 +37,16 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
         /// <summary>Calibration factor measured from the clean reverse legs alone (reported when <see cref="Asymmetric"/>).</summary>
         public float ReverseRatio { get; init; }
 
-        /// <summary>Lost motion measured on the forward-to-reverse transition (S3), in axis arcminutes.</summary>
-        public float BacklashEnteringReverseArcmin { get; init; }
+        /// <summary>
+        /// Lost motion when a move in the positive commanded direction reverses into it, in
+        /// axis arcminutes. Expressed in commanded (wire) sign, not in the calibration's own
+        /// forward/reverse legs, because the Reverse flag inverts the relation between the
+        /// two and the consumer of this value plans in wire sign.
+        /// </summary>
+        public float BacklashEnteringPositiveArcmin { get; init; }
 
-        /// <summary>Lost motion measured on the reverse-to-forward transition (S5), in axis arcminutes.</summary>
-        public float BacklashEnteringForwardArcmin { get; init; }
+        /// <summary>Lost motion when a move in the negative commanded direction reverses into it.</summary>
+        public float BacklashEnteringNegativeArcmin { get; init; }
 
         /// <summary>
         /// True when the two backlash transitions disagree beyond noise and tolerance.
