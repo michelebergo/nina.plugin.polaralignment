@@ -14,6 +14,16 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
     public interface IOapaCalibrationSolver {
         /// <summary>Captures an image and plate-solves it, retrying internally as configured.</summary>
         Task<CalibrationSolveSample> CaptureAndSolve(CancellationToken token);
+
+        /// <summary>
+        /// Marks the start of a calibration pass so the solver can freeze its topocentric
+        /// reference epoch. A tracked field keeps its RA/Dec while its Alt/Az drifts with
+        /// sidereal time, so samples transformed each at their own wall-clock time alias
+        /// sky rotation into platform motion — the displacement comparisons only mean
+        /// "axis motion" when every sample of a pass is expressed at one common epoch.
+        /// Default is a no-op for solvers that are time-invariant already (test fakes).
+        /// </summary>
+        void BeginCalibration() { }
     }
 
     /// <summary>Outcome of calibrating one axis, including the auto-reverse retry.</summary>
@@ -28,8 +38,16 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
         public float BacklashEnteringPositiveArcmin { get; init; }
         public float BacklashEnteringNegativeArcmin { get; init; }
         public bool DirectionalBacklash { get; init; }
+        /// <summary>True when the backlash pair was not measurable and both directions were zeroed.</summary>
+        public bool BacklashSuspect { get; init; }
+        /// <summary>True when the forward and reverse responses disagree by more than a factor of two.</summary>
+        public bool ResponseSuspect { get; init; }
         /// <summary>True when the Reverse flag had to be flipped (and the flip verified) to obtain a consistent result.</summary>
         public bool Flipped { get; init; }
+        /// <summary>True only when the closing moves verifiably returned the axis to its baseline (residual within tolerance).</summary>
+        public bool RestoredToBaseline { get; init; }
+        /// <summary>Residual against the baseline after the closing moves, in axis arcminutes; NaN when it could not be measured.</summary>
+        public float ClosingResidualArcmin { get; init; }
     }
 
     /// <summary>
@@ -125,7 +143,11 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
             BacklashEnteringPositiveArcmin = r.BacklashEnteringPositiveArcmin,
             BacklashEnteringNegativeArcmin = r.BacklashEnteringNegativeArcmin,
             DirectionalBacklash = r.DirectionalBacklash,
-            Flipped = flipped
+            BacklashSuspect = r.BacklashSuspect,
+            ResponseSuspect = r.ResponseSuspect,
+            Flipped = flipped,
+            RestoredToBaseline = r.RestoredToBaseline,
+            ClosingResidualArcmin = r.ClosingResidualArcmin
         };
 
         private async Task<AxisCalibrationResult> CalibrateAxis(
@@ -136,7 +158,21 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
             float dirSign = reversed ? -1f : 1f;
             int solveCount = 0;
             float movedArcmin = 0f;
+            // Whether the axis has physically left its baseline. Deliberately NOT the
+            // commanded sum: with backlash the sum returns to zero while the mechanism is
+            // still displaced (the reversal legs lose motion the forward legs delivered),
+            // so a failure at that exact moment used to skip the restore and leave the
+            // platform off its starting position. Once any move has been commanded, only a
+            // verified restore may clear the need for one.
+            var needsRestore = false;
             CalibrationSolveSample last = default;
+
+            // Freeze the solver's topocentric epoch for this pass: displacements between
+            // samples must measure axis motion only, not the sidereal drift of a tracked
+            // field's Alt/Az between solve times. Field signature of the aliasing: closing
+            // residuals against a minutes-old baseline that no iteration could remove
+            // (0.6' on one rig, 5' on a slower one).
+            solver.BeginCalibration();
 
             async Task<CalibrationSolveSample> NextSolve() {
                 if (++solveCount > MaxSolvesPerAxis) {
@@ -152,6 +188,7 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
             // the signed physical displacement measured by the next solve.
             async Task<double> MoveAndMeasure(float logicalArcmin, float logicalDirection) {
                 var wire = dirSign * logicalDirection * logicalArcmin;
+                needsRestore = true; // set before the move: a failure mid-motion leaves the position unknown
                 await MoveAndSettle(axis, wire, token).ConfigureAwait(false);
                 movedArcmin += wire;
                 var now = await NextSolve().ConfigureAwait(false);
@@ -173,6 +210,20 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
                 throw new InvalidOperationException(
                     $"{axisLabel}: field altitude {baseline.AltitudeDegrees:F0}° is too close to the zenith for azimuth calibration. " +
                     "Point the scope at a lower altitude (ideally toward the celestial pole) and retry.");
+            }
+
+            // The altitude actuator tilts the rig about the horizontal east-west axis; a field at
+            // azimuth A only shows cos(A) of that tilt in its altitude. Near due east/west there is
+            // no signal to measure, and a factor calibrated on the residual projection is inflated
+            // by 1/|cos(A)| — three field sessions on one rig produced 97.5/202.7/255.0 for a true
+            // factor of 73-85 this way. Refusing here, before any motion, beats measuring a number
+            // that will oscillate or stall the correction loop later.
+            var baselineCosAz = Math.Cos(baseline.AzimuthDegrees * Math.PI / 180.0);
+            if (!isAzimuth && Math.Abs(baselineCosAz) < OapaCalibrationGeometry.MinimumAltitudeCosAzimuth) {
+                throw new InvalidOperationException(
+                    $"{axisLabel}: field azimuth {baseline.AzimuthDegrees:F0}° is too close to due east/west for altitude calibration — " +
+                    $"only {Math.Abs(baselineCosAz):P0} of the axis motion is visible there. " +
+                    "Point the scope toward the meridian or the celestial pole and retry.");
             }
 
             try {
@@ -252,7 +303,15 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
                 // The backlash transitions are evaluated against the response of the
                 // direction the axis was travelling toward, so a direction asymmetry does
                 // not masquerade as backlash (or as slippage).
-                var backlashForward = Math.Max(0, backlashLeg * reverseResponse - reversalTravel);
+                //
+                // The raw (unclamped) value is kept: a *negative* transition means the
+                // reversal leg travelled further than the response predicts, which no amount
+                // of real play can produce. Clamping it to zero turns that impossibility into
+                // a plausible-looking "no play this way", and paired against a significant
+                // value in the other direction that zero becomes tens of arcminutes of
+                // compensation made of nothing.
+                var rawForward = backlashLeg * reverseResponse - reversalTravel;
+                var backlashForward = Math.Max(0, rawForward);
 
                 // S5: opposite transition. This is a *second quantity*, not a second sample
                 // of the first: the two are equal only on a mechanism whose play costs the
@@ -260,20 +319,71 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
                 // is not. Their disagreement is therefore a directionality verdict.
                 reportStatus?.Invoke($"{axisLabel}: measuring the opposite transition...");
                 var dBack = await MoveAndMeasure(backlashLeg, +1f).ConfigureAwait(false);
-                var backlashReverse = Math.Max(0, backlashLeg * forwardResponse - Math.Abs(dBack));
+                var rawReverse = backlashLeg * forwardResponse - Math.Abs(dBack);
+                var backlashReverse = Math.Max(0, rawReverse);
+
+                var maxResponse = Math.Max(forwardResponse, reverseResponse);
+                var responseAgreement = maxResponse > 0 ? Math.Min(forwardResponse, reverseResponse) / maxResponse : 0.0;
+                var asymmetric = 1.0 - responseAgreement > AsymmetryFlagThreshold;
+                // Beyond a factor of two the mean is not a compromise between the two
+                // directions, it is wrong for both - and each backlash transition is
+                // evaluated against the *other* direction's response, so the pair goes with
+                // it. Field evidence: fwd=0.860 against rev=0.102 produced a factor three
+                // times what the axis delivered during the corrections that followed.
+                var responseSuspect = responseAgreement < ResponseAgreementFloor;
 
                 double backlash;
                 var directional = false;
+                var backlashSuspect = responseSuspect;
                 var significant = Math.Max(backlashForward, backlashReverse);
                 if (significant < 2 * threshold) {
                     backlash = 0; // both transitions indistinguishable from noise
+                } else if (backlashSuspect || Math.Min(rawForward, rawReverse) < -threshold) {
+                    // An impossible transition invalidates the pair, not just itself: both
+                    // are computed from the same two responses over the same escalated leg.
+                    backlashSuspect = true;
+                    backlash = 0;
                 } else {
-                    directional = Math.Abs(backlashForward - backlashReverse) > Math.Max(DirectionalRelativeThreshold * significant, 2 * threshold);
+                    // A transition indistinguishable from zero paired against a significant
+                    // one cannot establish directionality. Zero-against-large is the field
+                    // signature of a slipped measurement, not of directional mechanics: the
+                    // same axis measured 4.10'/4.31' and, five minutes later, 0.00'/8.69' -
+                    // stable sum, flipped split - and the phantom pair threw a 23" residual
+                    // to 6'32" at the finish line. (0.00'/27.21' on the same rig is the other
+                    // occurrence; no genuine pair with a zero side has ever repeated.) The
+                    // mean is the safe collapse: a symmetric value's magnitude cancels out of
+                    // the two-leg plan, so even an imperfect mean only costs travel time.
+                    var bothTransitionsMeasurable = Math.Min(backlashForward, backlashReverse) >= threshold;
+                    directional = bothTransitionsMeasurable
+                        && Math.Abs(backlashForward - backlashReverse) > Math.Max(DirectionalRelativeThreshold * significant, 2 * threshold);
                     backlash = (backlashForward + backlashReverse) / 2.0;
+                    if (!bothTransitionsMeasurable) {
+                        Logger.Info($"OAPA cal {axisLabel}: one backlash transition is indistinguishable from zero against " +
+                            $"{significant:F2}' on the other - the split is not established (slip signature); using the mean {backlash:F2}' for both directions");
+                    }
+                }
+
+                // backlashForward was measured entering the leg direction -dirSign (S3),
+                // backlashReverse entering +dirSign (S5). The Reverse flag therefore swaps
+                // which one belongs to which commanded sign; resolving it here means no
+                // consumer has to know about dirSign at all.
+                var enteringPositive = (float)(dirSign > 0 ? backlashReverse : backlashForward);
+                var enteringNegative = (float)(dirSign > 0 ? backlashForward : backlashReverse);
+                if (!directional) {
+                    // A "not directional" verdict is the statement that these two figures are
+                    // the same quantity measured twice. Reporting them separately anyway hands
+                    // the planner a difference made of measurement noise, and a two-leg
+                    // reversal travels `move - outward + back`: that gap becomes a fixed bias
+                    // on every reversal, so the axis can never be corrected by less than the
+                    // gap and requests below it move it the wrong way. Two field rigs stalled
+                    // at exactly their own gap - 9.3' and 7.3' - with `directional=false` in
+                    // the same log line. Collapsing to the mean restores the single-value
+                    // behaviour wherever the difference is not established, and changes
+                    // nothing where it is.
+                    enteringPositive = enteringNegative = (float)backlash;
                 }
 
                 var meanResponse = (forwardResponse + reverseResponse) / 2.0;
-                var asymmetric = Math.Abs(forwardResponse - reverseResponse) / Math.Max(forwardResponse, reverseResponse) > AsymmetryFlagThreshold;
 
                 var result = new AxisCalibrationResult {
                     Ratio = (float)(currentRatio / meanResponse),
@@ -283,27 +393,36 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
                     NoiseSigmaArcmin = (float)noise,
                     Consistent = directionConsistent,
                     Asymmetric = asymmetric,
-                    // backlashForward was measured entering the leg direction -dirSign (S3),
-                    // backlashReverse entering +dirSign (S5). The Reverse flag therefore
-                    // swaps which one belongs to which commanded sign; resolving it here
-                    // means no consumer has to know about dirSign at all.
-                    BacklashEnteringPositiveArcmin = (float)(dirSign > 0 ? backlashReverse : backlashForward),
-                    BacklashEnteringNegativeArcmin = (float)(dirSign > 0 ? backlashForward : backlashReverse),
-                    DirectionalBacklash = directional
+                    BacklashEnteringPositiveArcmin = enteringPositive,
+                    BacklashEnteringNegativeArcmin = enteringNegative,
+                    DirectionalBacklash = directional,
+                    BacklashSuspect = backlashSuspect,
+                    ResponseSuspect = responseSuspect
                 };
 
+                // Both the raw pair and the pair that will actually be applied: they differ
+                // whenever the directionality verdict collapses them, and a log that only
+                // showed one of the two is what made this take three field sessions to find.
+                // The pointing and its projection make a future log self-diagnosing: a factor
+                // measured through a foreshortened projection is visible right where it was born.
                 Logger.Info($"OAPA cal {axisLabel}: noise={noise:F2}', responses fwd={forwardResponse:F3}/rev={reverseResponse:F3} '/unit, " +
-                    $"backlash={backlashForward:F2}'/{backlashReverse:F2}' -> {backlash:F2}', ratio={result.Ratio:F2}, " +
-                    $"consistent={result.Consistent}, asymmetric={result.Asymmetric}, directional={result.DirectionalBacklash}, solves={solveCount}");
+                    $"backlash={backlashForward:F2}'/{backlashReverse:F2}' -> applied +{enteringPositive:F2}'/-{enteringNegative:F2}', ratio={result.Ratio:F2}, " +
+                    $"consistent={result.Consistent}, asymmetric={result.Asymmetric}, directional={result.DirectionalBacklash}, " +
+                    $"backlashSuspect={backlashSuspect}, responseSuspect={responseSuspect}, solves={solveCount}, " +
+                    $"field alt={baseline.AltitudeDegrees:F1}/az={baseline.AzimuthDegrees:F1}, proj={(isAzimuth ? 1.0 : baselineCosAz):F3}");
 
                 // S6: physically return to the baseline. The response just measured makes
                 // the closing moves exact; iterating covers the backlash a closing reversal
-                // eats on its first move.
+                // eats on its first move. The outcome is carried on the result: a
+                // calibration that measured fine but did not verifiably return home must
+                // say so, not report full success.
                 var responsePerWire = f1 / (dirSign * legLogical);
-                await CloseLoopAgainstBaseline(axis, isAzimuth, baseline, responsePerWire, axisLabel, reportStatus, NextSolve, token).ConfigureAwait(false);
+                var (restored, closingResidual) = await CloseLoopAgainstBaseline(axis, isAzimuth, baseline, responsePerWire, axisLabel, reportStatus, NextSolve, token).ConfigureAwait(false);
+                result.RestoredToBaseline = restored;
+                result.ClosingResidualArcmin = closingResidual;
 
                 return result;
-            } catch (Exception) when (movedArcmin != 0f) {
+            } catch (Exception) when (needsRestore) {
                 await BestEffortRestore(axis, isAzimuth, baseline, movedArcmin, axisLabel).ConfigureAwait(false);
                 throw;
             }
@@ -313,20 +432,28 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
         /// Drives the measured residual against the baseline back to zero, up to
         /// <see cref="MaxClosingIterations"/> moves: the first closing reversal loses the
         /// backlash, the following iteration completes the travel. A failed closing move
-        /// never discards the calibration result.
+        /// never discards the calibration result, but it must not be silent either: the
+        /// returned pair says whether the axis is verifiably back home (residual measured
+        /// and within tolerance) and what that residual was (NaN when unmeasurable).
+        /// Cancellation is not handled here — it propagates so the caller's best-effort
+        /// restore runs and the cancellation reaches the user instead of being converted
+        /// into an apparent success.
         /// </summary>
-        private async Task CloseLoopAgainstBaseline(
+        private async Task<(bool restored, float residualArcmin)> CloseLoopAgainstBaseline(
             Axis axis, bool isAzimuth, CalibrationSolveSample baseline, double responsePerWire,
             string axisLabel, Action<string> reportStatus, Func<Task<CalibrationSolveSample>> nextSolve, CancellationToken token) {
 
-            if (Math.Abs(responsePerWire) < 1e-3) { return; }
+            if (Math.Abs(responsePerWire) < 1e-3) {
+                Logger.Warning($"OAPA cal {axisLabel}: response too small to close the loop; the axis was not returned to its baseline");
+                return (false, float.NaN);
+            }
             try {
                 var current = await nextSolve().ConfigureAwait(false);
                 for (var i = 0; i < MaxClosingIterations; i++) {
                     var residual = OapaCalibrationGeometry.SignedAxisDisplacementArcmin(isAzimuth, baseline, current);
                     if (Math.Abs(residual) < RestoreToleranceArcmin) {
                         Logger.Info($"OAPA cal {axisLabel}: closed loop against baseline; residual {residual:F2}'");
-                        return;
+                        return (true, (float)residual);
                     }
                     var closing = (float)Math.Clamp(-residual / responsePerWire, -3.0 * calibrationStepArcmin, 3.0 * calibrationStepArcmin);
                     reportStatus?.Invoke($"{axisLabel}: returning to start ({residual:+0.0;-0.0}' off)...");
@@ -334,10 +461,16 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
                     current = await nextSolve().ConfigureAwait(false);
                 }
                 var final = OapaCalibrationGeometry.SignedAxisDisplacementArcmin(isAzimuth, baseline, current);
-                Logger.Info($"OAPA cal {axisLabel}: closing iterations exhausted; residual {final:F2}'");
+                var withinTolerance = Math.Abs(final) < RestoreToleranceArcmin;
+                Logger.Info($"OAPA cal {axisLabel}: closing iterations exhausted; residual {final:F2}'" +
+                    (withinTolerance ? string.Empty : " (out of tolerance - the axis is not back at its baseline)"));
+                return (withinTolerance, (float)final);
+            } catch (OperationCanceledException) {
+                throw;
             } catch (Exception ex) {
                 // The calibration result is already measured; a failed closing move must not discard it.
                 Logger.Warning($"OAPA cal {axisLabel}: failed to close the loop against the baseline ({ex.Message})");
+                return (false, float.NaN);
             }
         }
 
@@ -393,6 +526,8 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
         private const int MaxBacklashEscalations = 3;
         /// <summary>Forward/reverse response disagreement above which the axis is flagged asymmetric.</summary>
         private const double AsymmetryFlagThreshold = 0.10;
+        /// <summary>Below this min/max response ratio (a factor of two) the pass measured nothing usable.</summary>
+        private const double ResponseAgreementFloor = 0.5;
         /// <summary>Backlash-transition disagreement share above which the play is declared direction-dependent.</summary>
         private const double DirectionalRelativeThreshold = 0.20;
         /// <summary>Hard solve budget per axis pass; exceeded means something is off and the sequence aborts honestly.</summary>

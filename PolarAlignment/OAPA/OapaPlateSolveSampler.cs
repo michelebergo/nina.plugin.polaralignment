@@ -18,6 +18,14 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
     /// Capture-and-solve boundary implementation for the OAPA self-calibration: captures a
     /// snapshot with the profile's plate-solve settings, solves it, and returns the solved
     /// field center with its topocentric altitude. Retries internally on solver failures.
+    ///
+    /// All samples of one calibration pass are transformed at a single reference epoch —
+    /// the time of the pass's first solve. A tracked field keeps its RA/Dec while its
+    /// Alt/Az drifts with sidereal time, so transforming each sample at its own wall-clock
+    /// time would alias sky rotation into the displacement measurements: the direction
+    /// check, the responses, and above all the closing moves against a minutes-old
+    /// baseline (whose phantom residual no iteration can remove). Freezing the epoch makes
+    /// every comparison mean "axis motion" and nothing else.
     /// </summary>
     public sealed class OapaPlateSolveSampler : IOapaCalibrationSolver {
         private const int PlateSolveRetries = 2;
@@ -27,6 +35,7 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
         private readonly IImagingMediator imagingMediator;
         private readonly ITelescopeMediator telescopeMediator;
         private readonly IPlateSolverFactory plateSolverFactory;
+        private DateTime? sessionEpoch;
 
         public OapaPlateSolveSampler(
             IProfileService profileService,
@@ -59,11 +68,27 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
                 (lastException != null ? $": {lastException.Message}" : string.Empty));
         }
 
+        /// <summary>Resets the reference epoch: the next solve of this pass will define it.</summary>
+        public void BeginCalibration() {
+            sessionEpoch = null;
+        }
+
         private CalibrationSolveSample ToSample(PlateSolveResult solve) {
             var latitude = Angle.ByDegree(profileService.ActiveProfile.AstrometrySettings.Latitude);
             var longitude = Angle.ByDegree(profileService.ActiveProfile.AstrometrySettings.Longitude);
-            var topocentric = solve.Coordinates.Transform(latitude, longitude, solve.Coordinates.DateTime.Now);
-            return new CalibrationSolveSample(solve.Coordinates.RADegrees, solve.Coordinates.Dec, topocentric.Altitude.Degree, topocentric.Azimuth.Degree);
+            var epoch = sessionEpoch ??= solve.Coordinates.DateTime.Now;
+            return ToSample(solve.Coordinates, latitude, longitude, epoch);
+        }
+
+        /// <summary>
+        /// Transforms a solved field center to the calibration sample frame at the given
+        /// reference epoch. Kept as a seam so the epoch-freezing contract is testable:
+        /// the same RA/Dec transformed at the same epoch must yield the same Alt/Az no
+        /// matter when the solve actually happened.
+        /// </summary>
+        internal static CalibrationSolveSample ToSample(Coordinates coordinates, Angle latitude, Angle longitude, DateTime epoch) {
+            var topocentric = coordinates.Transform(latitude, longitude, epoch);
+            return new CalibrationSolveSample(coordinates.RADegrees, coordinates.Dec, topocentric.Altitude.Degree, topocentric.Azimuth.Degree);
         }
 
         private async Task<PlateSolveResult> CaptureAndSolveOnce(CancellationToken token) {

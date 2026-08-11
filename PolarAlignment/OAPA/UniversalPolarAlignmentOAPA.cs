@@ -76,6 +76,7 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
         // Driver settings are volatile on the controller (lost on power cycle), so the
         // persisted values are pushed once per connection instead of only on field edits.
         private void ApplyStoredDriverConfiguration() {
+            OapaSettingsMigration.EnsureCurrent();
             var settings = Properties.Settings.Default;
             foreach (var command in OapaDriverCommands.StartupBatch(
                 settings.OAPAXRunCurrent, settings.OAPAXHoldPercent,

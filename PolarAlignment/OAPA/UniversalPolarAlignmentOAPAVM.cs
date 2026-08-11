@@ -29,6 +29,9 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
             IPlateSolverFactory plateSolverFactory,
             ICameraMediator cameraMediator,
             IMessageBroker messageBroker = null) : base(profileService) {
+            // Before any bound property reads a persisted parameter: the panel is often
+            // opened long before the controller is connected.
+            OapaSettingsMigration.EnsureCurrent();
             calibrationSolver = new OapaPlateSolveSampler(profileService, imagingMediator, telescopeMediator, plateSolverFactory);
             this.cameraMediator = cameraMediator;
 
@@ -470,7 +473,13 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
             var plan = BacklashModePlanner.PlanMoves(mode, position,
                 GetBacklashCompensation(axis), GetBacklashCompensationNegative(axis), LastDirectionOf(axis));
             if (plan.Length > 1 || System.Math.Abs(plan[0] - position) > float.Epsilon) {
-                Logger.Info($"OAPA backlash mode {mode} on {axis}: move {position:F2}' planned as [{string.Join(", ", plan)}]");
+                // The net is what the axis travels if it loses no play at all, so it is the
+                // floor of what a two-leg plan can achieve. When it drifts away from the
+                // requested move - or flips sign - the configured pair is asking the
+                // mechanism for play it does not have, which is invisible from the legs alone.
+                var net = 0f;
+                foreach (var m in plan) { net += m; }
+                Logger.Info($"OAPA backlash mode {mode} on {axis}: move {position:F2}' planned as [{string.Join(", ", plan)}] (net {net:F2}')");
             }
             foreach (var move in plan) {
                 await upa.MoveRelative(axis, speed, move, token).ConfigureAwait(false);
@@ -747,6 +756,18 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
                         if (y.Asymmetric) { details.Add($"Y forward {y.ForwardRatio:F1} / reverse {y.ReverseRatio:F1}"); }
                         consistencyMsg += $" \u26a0 The axis responds differently per direction ({string.Join("; ", details)}). The applied factor is the mean; convergence may take a few extra cycles.";
                     }
+                    if (x.ResponseSuspect || y.ResponseSuspect) {
+                        var details = new List<string>();
+                        if (x.ResponseSuspect) { details.Add($"X forward {x.ForwardRatio:F1} / reverse {x.ReverseRatio:F1}"); }
+                        if (y.ResponseSuspect) { details.Add($"Y forward {y.ForwardRatio:F1} / reverse {y.ReverseRatio:F1}"); }
+                        consistencyMsg += $" ⛔ The two directions disagree by more than a factor of two ({string.Join("; ", details)}), so the mean factor is wrong for both. Do not trust this pass: check that nothing is binding or hitting a travel limit and re-run the calibration.";
+                    }
+                    if (x.BacklashSuspect || y.BacklashSuspect) {
+                        var axes = new List<string>();
+                        if (x.BacklashSuspect) { axes.Add("X"); }
+                        if (y.BacklashSuspect) { axes.Add("Y"); }
+                        consistencyMsg += $" ⛔ The backlash on {string.Join(" and ", axes)} could not be measured (a reversal came back longer than the response allows), so it is reported as zero rather than as a number that would be applied. Re-run the calibration; if it repeats, measure the play by hand and enter it.";
+                    }
                     var directional = x.DirectionalBacklash || y.DirectionalBacklash;
                     if (directional) {
                         var details = new List<string>();
@@ -766,14 +787,28 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
                         DiscoveredYNoise = y.NoiseSigmaArcmin;
                         CalibrationDirectionalBacklash = directional;
                         CalibrationConsistencyMessage = consistencyMsg;
-                        CalibrationStatus = $"Done. X={x.Ratio:F2}, Y={y.Ratio:F2}, backlash X={x.BacklashArcmin:F2}', Y={y.BacklashArcmin:F2}'";
+                        CalibrationStatus = $"Done. X={x.Ratio:F2}, Y={y.Ratio:F2}, backlash X={Pair(x)}, Y={Pair(y)}" +
+                            (x.RestoredToBaseline && y.RestoredToBaseline ? string.Empty : " ⚠ not returned to start");
                         HasCalibrationResult = true;
                     });
 
-                    Logger.Info($"OAPA calibration result: X={x.Ratio:F2}, Y={y.Ratio:F2}, backlash X={x.BacklashArcmin:F2}', Y={y.BacklashArcmin:F2}', consistency: X={x.Consistent}, Y={y.Consistent}");
-                    Notification.ShowInformation(
-                        $"Calibration done. X factor: {x.Ratio:F2}, Y factor: {y.Ratio:F2}, backlash X: {x.BacklashArcmin:F2}', Y: {y.BacklashArcmin:F2}'",
-                        TimeSpan.FromSeconds(30));
+                    Logger.Info($"OAPA calibration result: X={x.Ratio:F2}, Y={y.Ratio:F2}, backlash X={Pair(x)}, Y={Pair(y)}, consistency: X={x.Consistent}, Y={y.Consistent}, " +
+                        $"restored: X={x.RestoredToBaseline} ({x.ClosingResidualArcmin:F2}'), Y={y.RestoredToBaseline} ({y.ClosingResidualArcmin:F2}')");
+                    // "Measured" and "physically back at the start" are different claims: a
+                    // calibration whose closing failed must not be announced as plain success,
+                    // or the platform silently keeps the calibration's last displacement.
+                    if (x.RestoredToBaseline && y.RestoredToBaseline) {
+                        Notification.ShowInformation(
+                            $"Calibration done. X factor: {x.Ratio:F2}, Y factor: {y.Ratio:F2}, backlash X: {Pair(x)}, Y: {Pair(y)}",
+                            TimeSpan.FromSeconds(30));
+                    } else {
+                        var offAxes = new List<string>();
+                        if (!x.RestoredToBaseline) { offAxes.Add($"Azimuth ({(float.IsNaN(x.ClosingResidualArcmin) ? "residual unknown" : $"{x.ClosingResidualArcmin:F1}' off")})"); }
+                        if (!y.RestoredToBaseline) { offAxes.Add($"Altitude ({(float.IsNaN(y.ClosingResidualArcmin) ? "residual unknown" : $"{y.ClosingResidualArcmin:F1}' off")})"); }
+                        Notification.ShowWarning(
+                            $"Calibration measured (X: {x.Ratio:F2}, Y: {y.Ratio:F2}), but the platform did not verifiably return to its starting position: {string.Join(", ", offAxes)}. " +
+                            "The measured factors are valid; re-check your polar alignment before imaging.");
+                    }
                 } catch (OperationCanceledException) {
                     Logger.Info("OAPA self-calibration cancelled");
                     await RunOnUi(() => CalibrationStatus = "Cancelled");
@@ -791,6 +826,20 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
             });
         }
 
+        /// <summary>
+        /// Renders a measured backlash pair the way it will be applied. Every user-facing
+        /// string goes through here: printing one of the two directions and calling it "the
+        /// measured backlash" is how a rig ran a whole session with 54.34'/45.02' configured
+        /// while the panel, the notification and the log all said 54.34'.
+        /// </summary>
+        private static string Pair(AxisCalibrationOutcome a)
+            => a.BacklashEnteringPositiveArcmin == a.BacklashEnteringNegativeArcmin
+                ? $"{a.BacklashEnteringPositiveArcmin:F2}'"
+                : $"+{a.BacklashEnteringPositiveArcmin:F2}'/-{a.BacklashEnteringNegativeArcmin:F2}'";
+
+        private static string Pair(float positive, float negative)
+            => positive == negative ? $"{positive:F2}'" : $"+{positive:F2}'/-{negative:F2}'";
+
         [RelayCommand(CanExecute = nameof(CanApplyCalibration))]
         public void ApplyCalibration() {
             try {
@@ -799,8 +848,8 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
                 var manual = new List<string>();
                 if (XGearRatioSource == OapaParameterSource.Manual) { manual.Add($"X factor {XGearRatio:F1} -> {DiscoveredXRatio:F1}"); }
                 if (YGearRatioSource == OapaParameterSource.Manual) { manual.Add($"Y factor {YGearRatio:F1} -> {DiscoveredYRatio:F1}"); }
-                if (XBacklashSource == OapaParameterSource.Manual) { manual.Add($"X backlash {XBacklashCompensation:F1}' -> {DiscoveredXBacklash:F1}'"); }
-                if (YBacklashSource == OapaParameterSource.Manual) { manual.Add($"Y backlash {YBacklashCompensation:F1}' -> {DiscoveredYBacklash:F1}'"); }
+                if (XBacklashSource == OapaParameterSource.Manual) { manual.Add($"X backlash {Pair(XBacklashCompensation, XBacklashCompensationNegative)} -> {Pair(DiscoveredXBacklash, DiscoveredXBacklashNegative)}"); }
+                if (YBacklashSource == OapaParameterSource.Manual) { manual.Add($"Y backlash {Pair(YBacklashCompensation, YBacklashCompensationNegative)} -> {Pair(DiscoveredYBacklash, DiscoveredYBacklashNegative)}"); }
                 if (manual.Count > 0 && !ApplyConfirmationPending) {
                     ApplyConfirmationPending = true;
                     CalibrationStatus = $"These values were set manually and would be replaced: {string.Join("; ", manual)}. Press Apply again to confirm.";
@@ -820,8 +869,8 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
                 XBacklashMode = BacklashModePlanner.Recommend(DiscoveredXBacklash, DiscoveredXBacklashNegative, DiscoveredXNoise);
                 YBacklashMode = BacklashModePlanner.Recommend(DiscoveredYBacklash, DiscoveredYBacklashNegative, DiscoveredYNoise);
                 HasCalibrationResult = false;
-                CalibrationStatus = $"Applied. Backlash mode set to X: {XBacklashMode}, Y: {YBacklashMode} (from the measured {DiscoveredXBacklash:F1}'/{DiscoveredYBacklash:F1}')";
-                Logger.Info($"OAPA calibration applied: X={DiscoveredXRatio:F2}, Y={DiscoveredYRatio:F2}, backlash X={DiscoveredXBacklash:F2}', Y={DiscoveredYBacklash:F2}', modes X={XBacklashMode}, Y={YBacklashMode}");
+                CalibrationStatus = $"Applied. Backlash mode set to X: {XBacklashMode}, Y: {YBacklashMode} (from the measured X {Pair(DiscoveredXBacklash, DiscoveredXBacklashNegative)}, Y {Pair(DiscoveredYBacklash, DiscoveredYBacklashNegative)})";
+                Logger.Info($"OAPA calibration applied: X={DiscoveredXRatio:F2}, Y={DiscoveredYRatio:F2}, backlash X={Pair(DiscoveredXBacklash, DiscoveredXBacklashNegative)}, Y={Pair(DiscoveredYBacklash, DiscoveredYBacklashNegative)}, modes X={XBacklashMode}, Y={YBacklashMode}");
                 Notification.ShowInformation($"Calibration applied. Backlash mode X: {XBacklashMode}, Y: {YBacklashMode}", TimeSpan.FromSeconds(30));
             } catch (Exception ex) {
                 Logger.Error(ex);

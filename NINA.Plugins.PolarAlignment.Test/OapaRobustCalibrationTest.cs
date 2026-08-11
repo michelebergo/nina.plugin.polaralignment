@@ -28,6 +28,14 @@ namespace NINA.Plugins.PolarAlignment.Test {
             private readonly double noiseAmplitudeArcmin;
             /// <summary>-1 models a rig wired so the sky moves opposite the commanded sign: the case the Reverse flag exists for.</summary>
             private readonly int physicalSign;
+            /// <summary>
+            /// Where the camera points while calibrating. The altitude actuator tilts the rig
+            /// about the horizontal east-west axis, so the field's altitude only shows
+            /// cos(azimuth) of the physical tilt: full toward north (the default), reversed
+            /// toward south, nothing due east/west. The fake models that projection so the
+            /// service is proven to undo it.
+            /// </summary>
+            private readonly double fieldAzimuthDegrees;
             private uint rng;
             private int reversals;
             private double physicalPositionArcmin;
@@ -41,12 +49,14 @@ namespace NINA.Plugins.PolarAlignment.Test {
                                   double[] backlashSequence = null,
                                   double noiseAmplitudeArcmin = 0,
                                   int seed = 12345,
-                                  int physicalSign = 1) {
+                                  int physicalSign = 1,
+                                  double fieldAzimuthDegrees = 0.0) {
                 this.forwardScale = forwardScale;
                 this.reverseScale = reverseScale ?? forwardScale;
                 this.backlashSequence = backlashSequence ?? new[] { 0.0 };
                 this.noiseAmplitudeArcmin = noiseAmplitudeArcmin;
                 this.physicalSign = physicalSign;
+                this.fieldAzimuthDegrees = fieldAzimuthDegrees;
                 rng = (uint)seed;
             }
 
@@ -73,9 +83,10 @@ namespace NINA.Plugins.PolarAlignment.Test {
 
             public Task<CalibrationSolveSample> CaptureAndSolve(CancellationToken token) {
                 SolveCount++;
-                var observed = physicalPositionArcmin + NextNoise();
+                var projection = Math.Cos(fieldAzimuthDegrees * Math.PI / 180.0);
+                var observed = physicalPositionArcmin * projection + NextNoise();
                 return Task.FromResult(new CalibrationSolveSample(
-                    10.0, observed / 60.0, 30.0 + observed / 60.0, 100.0));
+                    10.0, observed / 60.0, 30.0 + observed / 60.0, fieldAzimuthDegrees));
             }
 
             public double PhysicalPositionArcmin => physicalPositionArcmin;
@@ -222,6 +233,170 @@ namespace NINA.Plugins.PolarAlignment.Test {
                 outcome.BacklashEnteringPositiveArcmin, 2f, "a symmetric mechanism reports the same both ways");
         }
 
+        // ----- What the pair is allowed to say -----
+        // A two-leg reversal plan travels `move - outward + back`, so any gap between the
+        // reported pair is a fixed bias on every reversal that only real play cancels. The
+        // pair may therefore be split only when the difference has been established, and
+        // must not be reported at all when the pass did not measure one.
+
+        [Test]
+        public async Task NotDirectional_ReportsTheTwoDirectionsIdentical_NotTwoNoisySamples() {
+            // A mechanism whose two transitions differ by less than the verdict's threshold.
+            // Reporting 11.6 and 12.4 separately would hand the planner a 0.8' floor made of
+            // measurement noise; reporting the mean twice hands it nothing.
+            var axis = new RobustFakeAxis(forwardScale: 1.0, backlashSequence: new[] { 12.0, 11.0 });
+
+            var outcome = await Calibrate(axis);
+
+            outcome.DirectionalBacklash.Should().BeFalse();
+            outcome.BacklashEnteringPositiveArcmin.Should().Be(outcome.BacklashEnteringNegativeArcmin,
+                "an unestablished difference must be exactly zero, not small");
+            outcome.BacklashEnteringPositiveArcmin.Should().Be(outcome.BacklashArcmin);
+        }
+
+        [Test]
+        public async Task ValoCase_ZeroAgainstLarge_IsCollapsedToTheMean_NotSplit() {
+            // Field case, twice on the same rig: an axis that measured 4.10'/4.31'
+            // (symmetric) reported 0.00'/8.69' five minutes later - stable sum, flipped
+            // split. Zero-against-large is the signature of a transition that slipped
+            // during measurement, not of directional mechanics, and the phantom split
+            // threw a 23" residual to 6'32" right at the finish line. A pair with one
+            // side indistinguishable from zero must not establish directionality; the
+            // mean is the safe collapse because a symmetric value's magnitude cancels
+            // out of the two-leg plan.
+            var axis = new RobustFakeAxis(forwardScale: 1.0, backlashSequence: new[] { 8.7, 0.0 });
+
+            var outcome = await Calibrate(axis);
+
+            outcome.DirectionalBacklash.Should().BeFalse(
+                "one transition indistinguishable from zero cannot establish a directional split");
+            outcome.BacklashEnteringPositiveArcmin.Should().Be(outcome.BacklashEnteringNegativeArcmin,
+                "the pair must collapse to a single symmetric value");
+            outcome.BacklashArcmin.Should().BeApproximately(4.35f, 1f,
+                "the mean keeps the real (symmetric) play compensated instead of discarding it");
+            outcome.BacklashSuspect.Should().BeFalse(
+                "the mean is usable - this is a collapsed split, not an unmeasurable pair");
+        }
+
+        [Test]
+        public async Task Directional_KeepsTheTwoDirectionsApart() {
+            var axis = new RobustFakeAxis(forwardScale: 1.0, backlashSequence: new[] { 20.0, 8.0 });
+
+            var outcome = await Calibrate(axis);
+
+            outcome.DirectionalBacklash.Should().BeTrue();
+            outcome.BacklashEnteringNegativeArcmin.Should().BeGreaterThan(
+                outcome.BacklashEnteringPositiveArcmin + 5f, "the established difference survives");
+        }
+
+        [Test]
+        public async Task ImpossibleTransition_IsZeroedOnBothDirections_NotPairedAgainstTheOther() {
+            // A reversal that travels *further* than the response predicts - a preload
+            // letting go, a stick-slip release - produces a negative transition that the
+            // clamp turns into a plausible "no play this way". Paired against a real 8' in
+            // the other direction that zero would become 8' of compensation made of nothing.
+            // Field precedent: a calibration reported 0.00'/27.21' and offered it.
+            var axis = new RobustFakeAxis(forwardScale: 1.0, backlashSequence: new[] { -12.0, 8.0 });
+
+            var outcome = await Calibrate(axis);
+
+            outcome.BacklashSuspect.Should().BeTrue();
+            outcome.BacklashArcmin.Should().Be(0f);
+            outcome.BacklashEnteringPositiveArcmin.Should().Be(0f);
+            outcome.BacklashEnteringNegativeArcmin.Should().Be(0f);
+            outcome.DirectionalBacklash.Should().BeFalse();
+        }
+
+        [Test]
+        public async Task ResponsesDisagreeingByMoreThanTwice_AreFlagged_AndTakeTheBacklashWithThem() {
+            // Field case: fwd=0.860 against rev=0.102 on an altitude axis. The mean of those
+            // is wrong for both directions, and each backlash transition is evaluated against
+            // the *other* direction's response - so nothing this pass measured is usable.
+            var axis = new RobustFakeAxis(forwardScale: 1.0, reverseScale: 0.12);
+
+            var outcome = await Calibrate(axis);
+
+            outcome.ResponseSuspect.Should().BeTrue();
+            outcome.Asymmetric.Should().BeTrue("the softer flag fires too");
+            outcome.BacklashSuspect.Should().BeTrue();
+            outcome.BacklashEnteringPositiveArcmin.Should().Be(0f);
+            outcome.BacklashEnteringNegativeArcmin.Should().Be(0f);
+        }
+
+        [Test]
+        public async Task ModerateResponseAsymmetry_IsFlaggedButStillUsable() {
+            // 15% is a real axis with a heavier direction, not a broken measurement: the
+            // stronger flag must not fire and the backlash must survive.
+            var axis = new RobustFakeAxis(forwardScale: 1.0, reverseScale: 0.85, backlashSequence: new[] { 6.0 });
+
+            var outcome = await Calibrate(axis);
+
+            outcome.Asymmetric.Should().BeTrue();
+            outcome.ResponseSuspect.Should().BeFalse();
+            outcome.BacklashSuspect.Should().BeFalse();
+            outcome.BacklashArcmin.Should().BeApproximately(6f, 1.5f);
+        }
+
+        /// <summary>Drives a plan through a mechanism with per-direction play and returns the arrival.</summary>
+        private static float Arrive(float[] plan, float lostEnteringPositive, float lostEnteringNegative) {
+            var position = 0f;
+            var lastSign = 1;
+            foreach (var move in plan) {
+                var sign = Math.Sign(move);
+                if (sign == 0) { continue; }
+                var lost = sign != lastSign ? (sign > 0 ? lostEnteringPositive : lostEnteringNegative) : 0f;
+                position += move - sign * Math.Min(Math.Abs(move), lost);
+                lastSign = sign;
+            }
+            return position;
+        }
+
+        [Test]
+        public async Task WhatTheCalibrationReports_CorrectsArbitrarilySmallErrors_OnASymmetricAxis() {
+            // The capstone: the two halves joined. A genuinely symmetric mechanism with 50'
+            // of play, measured through noisy solves so the two transitions come back
+            // *different* - which is the exact input that used to produce a permanent floor.
+            // Feed whatever the calibration reports straight into the planner and drive the
+            // same mechanism with it: every request must land, including requests two orders
+            // of magnitude smaller than the play.
+            var axis = new RobustFakeAxis(forwardScale: 1.0, backlashSequence: new[] { 50.0 }, noiseAmplitudeArcmin: 0.3);
+
+            var outcome = await Calibrate(axis);
+
+            outcome.BacklashEnteringPositiveArcmin.Should().Be(outcome.BacklashEnteringNegativeArcmin,
+                "solve noise must not survive as a difference between the directions");
+
+            foreach (var request in new[] { -20f, -5f, -1f, -0.3f }) {
+                var plan = BacklashModePlanner.PlanMoves(OapaBacklashMode.Unidirectional, request,
+                    outcome.BacklashEnteringPositiveArcmin, outcome.BacklashEnteringNegativeArcmin,
+                    LastDirection.Positive);
+
+                Arrive(plan, 50f, 50f).Should().BeApproximately(request, 0.01f, $"request={request}");
+            }
+        }
+
+        [Test]
+        public async Task AnAsymmetryTooSmallToEstablish_CostsItsOwnSize_AndNoMore() {
+            // The other side of the same coin, stated rather than implied. A real 6%
+            // asymmetry (50'/47') is below the verdict's threshold, so it is averaged and
+            // leaves a residual - but the residual is the *real* 3' gap, which physics
+            // bounds. That is the trade: averaging can only ever be wrong by the asymmetry
+            // the axis actually has, while splitting an unestablished pair is wrong by the
+            // measurement error, which nothing bounds and which reached 9.3' in the field.
+            var axis = new RobustFakeAxis(forwardScale: 1.0, backlashSequence: new[] { 50.0, 47.0 });
+
+            var outcome = await Calibrate(axis);
+
+            outcome.DirectionalBacklash.Should().BeFalse("3' on 50' is 6%, below the 20% the verdict needs");
+
+            var plan = BacklashModePlanner.PlanMoves(OapaBacklashMode.Unidirectional, -20f,
+                outcome.BacklashEnteringPositiveArcmin, outcome.BacklashEnteringNegativeArcmin,
+                LastDirection.Positive);
+
+            Arrive(plan, lostEnteringPositive: 47f, lostEnteringNegative: 50f)
+                .Should().BeApproximately(-20f + 3f, 0.5f, "the residual is the real asymmetry, not the measurement error");
+        }
+
         [Test]
         public async Task SolveBudget_IsRespected_NominalAndGilas() {
             var nominal = new RobustFakeAxis(forwardScale: 0.5, backlashSequence: new[] { 5.0 });
@@ -247,6 +422,53 @@ namespace NINA.Plugins.PolarAlignment.Test {
                 outcome.BacklashArcmin.Should().BeApproximately((float)backlash, 0.5f,
                     $"scale={scale}, backlash={backlash}");
             }
+        }
+
+        [Test]
+        public async Task AyhanCase_CalibratedFarFromTheMeridian_StillRecoversTheTrueFactor() {
+            // Field case: a healthy axis calibrated pointing at azimuth 137° reported a
+            // factor inflated by exactly 1/|cos(137°)| — 202.7 steps/arcmin for a mechanism
+            // that delivered 85 in the very same log. The calibration must divide the
+            // measured altitude displacement by the signed projection and recover the true
+            // factor from any admitted pointing. (The same rig's az-108 session sits below
+            // the projection floor and is refused outright — see the refusal test.)
+            var axis = new RobustFakeAxis(forwardScale: 1.0, fieldAzimuthDegrees: 137.2);
+
+            var outcome = await Calibrate(axis);
+
+            outcome.Ratio.Should().BeApproximately(100f, 6f,
+                "the factor must describe the axis, not the pointing it was measured through");
+            outcome.Flipped.Should().BeFalse(
+                "south-of-east pointing flips the raw altitude response; the signed projection must absorb that, not the Reverse flag");
+        }
+
+        [Test]
+        public async Task TheFactor_IsTheSame_WhereverTheCalibrationPoints() {
+            // The rc16 invariant, stated as an invariance: one mechanism, four pointings,
+            // one factor. (137° is the field case; 180° the anti-meridian with its sign
+            // flip; 0° the pole where nothing changes; 150° a comfortable south-east.)
+            foreach (var az in new[] { 0.0, 137.2, 180.0, 150.0 }) {
+                var axis = new RobustFakeAxis(forwardScale: 0.5, backlashSequence: new[] { 5.0 }, fieldAzimuthDegrees: az);
+
+                var outcome = await Calibrate(axis);
+
+                outcome.Ratio.Should().BeApproximately(200f, 12f, $"pointing az={az}");
+                outcome.BacklashArcmin.Should().BeApproximately(5f, 1f,
+                    $"the physical play must not scale with the pointing either (az={az})");
+                outcome.Flipped.Should().BeFalse($"the Reverse flag must not depend on the pointing (az={az})");
+            }
+        }
+
+        [Test]
+        public async Task PointingNearDueEastWest_IsRefusedBeforeAnyMotion() {
+            // Below the projection floor there is no signal to calibrate on. The refusal
+            // must come from the baseline solve, before the axis has been commanded once.
+            var axis = new RobustFakeAxis(forwardScale: 1.0, fieldAzimuthDegrees: 78.0);
+
+            var act = () => Calibrate(axis);
+
+            await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*east/west*");
+            axis.CommandedMoves.Should().BeEmpty("no motion may be commanded on an unusable pointing");
         }
     }
 }

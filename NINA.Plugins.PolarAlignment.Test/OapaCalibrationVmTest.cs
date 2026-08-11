@@ -66,7 +66,7 @@ namespace NINA.Plugins.PolarAlignment.Test {
 
             public Task<CalibrationSolveSample> CaptureAndSolve(CancellationToken token) {
                 return Task.FromResult(new CalibrationSolveSample(
-                    10.0, axes[Axis.YAxis].pos / 60.0, axes[Axis.YAxis].pos / 60.0, 100.0 + axes[Axis.XAxis].pos / 60.0));
+                    10.0, axes[Axis.YAxis].pos / 60.0, axes[Axis.YAxis].pos / 60.0, 0.0 + axes[Axis.XAxis].pos / 60.0));
             }
         }
 

@@ -243,21 +243,37 @@ Applying a calibration sets the recommended mode automatically. If you are choos
 * **Off** — the measured backlash is below the noise floor of the plate solves. Nothing to compensate.
 * **Full** — the backlash is small and repeatable. A reversal is extended by the whole measured value.
 * **Soft** — as Full, but extending by 75%. A conservative choice when the value may be overestimated.
-* **Unidirectional** — the backlash is large, or it changes with load. Each move overshoots and returns, so the final approach always comes from the same direction and the play never enters the loop. Moves take longer, and with a large backlash they can take tens of seconds.
+* **Unidirectional** — the backlash is large, or it changes with load. Every move arrives travelling in the **positive direction** (up, against gravity, on the altitude axis): downward moves overshoot below the target and come back up, upward moves approach directly. The axis therefore always rests loaded on the same flank — it cannot settle into its own slack after a move — and the play never enters the final positioning. Moves take longer, and with a large backlash they can take tens of seconds.
 
 **The calibration warns that the backlash costs a different amount in each direction**: this is normal on an axis that carries its load against gravity. Going one way the weight crosses the play on its own; going the other the motor has to drive across it. The two figures are shown so you can see the spread — 50' one way and 15' the other is not unusual on a heavy altitude axis.
 
 Both figures are measured, applied and used: each axis has a **Backlash +** and a **Backlash -** field, and every compensation move is planned with the value of the direction that move travels. That is what makes the compensation exact on a directional axis — a single averaged value would be wrong in both directions, and the residual it left behind would be the whole spread between them. Equal values mean a symmetric axis and behave exactly as one value did.
 
+**The two fields are only filled differently when the calibration has established that the difference is real.** If it has not, both carry the same number, and that is deliberate rather than a missing measurement. A two-leg reversal travels `move − outward + back`, so whatever gap sits between the pair is added to *every* reversal: the axis then cannot be corrected by less than the gap, and a request below it moves the axis the wrong way. Equal values are immune to this no matter how large or how wrong they are — an overestimated symmetric backlash costs travel time and nothing else. So the plugin splits the pair only when splitting is better than averaging, and tells you which it did.
+
 What the warning cannot tell you is whether the mechanics also *slip*: for that, run the calibration twice. If each figure comes back close to its previous value the axis is simply directional; if the same figure jumps between runs, something is slipping — check grub screws, belt tension and friction with the real payload mounted.
 
+**The calibration says a transition could not be measured, or that the two directions disagree by more than a factor of two.** Both mean the pass measured nothing usable, and the plugin reports zero rather than a number it would then apply. The usual causes are an axis that reached a travel limit part-way through, a clutch that let go, or a field that was solving badly. Re-run it; if it repeats, the axis is not behaving repeatably enough to calibrate and the mechanics need attention first.
+
 If the correction loop converges nicely and then loses ground every time an axis reverses direction, that is the same problem seen from the other side. The mechanics are still the real fix: compensation costs travel time proportional to the play, and on a slow axis that is where the minutes go.
+
+## Where should the scope point while I run the Self-Calibration?
+
+**Anywhere reasonably toward the meridian or the pole — and never near due east or west.** The rule exists because of geometry, not preference: the altitude adjuster tilts the whole rig about a horizontal east-west axis, so a field at azimuth A only shows cos(A) of that tilt in its altitude. Toward north or south the calibration sees the full motion; due east or west it sees none at all, and whatever azimuth error your mount still has is where the field actually sits.
+
+The calibration corrects this projection automatically, so the measured factor describes your axis wherever you point — but close to east/west there is no signal left to correct, only noise, so pointings further than about 69° from the meridian (or from north) are refused with a message. If you see that message, slew toward the meridian and re-run; nothing was measured or moved.
+
+One rig calibrated three sessions in a row pointing 20-40° from due east. Every altitude factor came out inflated — 97.5, 202.7 and 255.0 steps per arcminute for a mechanism whose true factor was 73-85 — and the corrections then overshot threefold and oscillated without ever closing. The three "inconsistent" numbers were the same healthy axis seen through three different pointings. If your calibration factors change depending on where you calibrated before this release, that was why: re-calibrate once and they will not any more.
+
+The azimuth axis has the mirror-image rule, already enforced: not too close to the zenith. Both constraints are satisfied at the classic pointing — near the pole — and at any comfortable altitude near the meridian.
 
 ## My platform is very slow to correct. What can I do?
 
 Time in the correction phase is mostly **travel**, and travel is the play divided by the speed. On a high-reduction platform the two multiply into minutes. In order of leverage:
 
-1. **Lower the microstepping.** Steps per arcminute scale exactly with it, so going from 16 to 4 makes the axis four times faster at the same step rate *and gives back torque* — microstepping trades torque for smoothness. A platform at 1000 steps per arcminute drops to 250, which is still two orders of magnitude finer than a plate solve can measure. Set it per axis in the Motor Settings; the calibration factor is rescaled for you, and re-running the Self-Calibration afterwards is still worth it.
+1. **Lower the microstepping.** Steps per arcminute scale exactly with it, so going from 16 to 4 makes the axis four times faster at the same step rate. A platform at 1000 steps per arcminute drops to 250, which is still two orders of magnitude finer than a plate solve can measure. Set it per axis in the Motor Settings; the calibration factor is rescaled for you, and re-running the Self-Calibration afterwards is still worth it.
+
+   Two things to be honest about. Coarser microstepping raises the torque *per commanded step* — but you are also asking the motor to spin four times faster to get the four times, and stepper torque falls with speed, so treat "faster" and "stronger" as two separate experiments: change the microstepping first and keep the same sky speed, and only then raise the step rate. And it is coarser motion: if your axis is prone to stick-slip, larger discrete kicks can make that worse rather than better, so watch the leg-to-leg spread the calibration reports before and after.
 2. **Check the tolerance you are asking for.** Chasing 0.2' when 0.5' is already below what your guiding can see costs extra confirmation solves at the end of every run.
 3. **Shorten the plate solve** — exposure and search radius — once travel is no longer dominant.
 4. **Reduce the play mechanically.** A toothed belt in place of a gear stage, or a preloaded final mesh. This is the root cause; everything above works around it.

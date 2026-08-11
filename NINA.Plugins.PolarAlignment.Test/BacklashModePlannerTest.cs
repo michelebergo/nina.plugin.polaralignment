@@ -71,16 +71,31 @@ namespace NINA.Plugins.PolarAlignment.Test {
         }
 
         [Test]
-        public void Unidirectional_FinalApproachDirection_MatchesThePreviousDirection() {
-            // The whole point of the mode: the last commanded motion is always in the
-            // direction the axis was already engaged in, so backlash never enters the
-            // final positioning.
+        public void Unidirectional_FinalApproachDirection_IsAlwaysPositive() {
+            // The whole point of the mode, pinned since rc17: EVERY move arrives
+            // travelling in the positive direction (up, against gravity, on the altitude
+            // axis), so the axis always rests loaded on the same flank and cannot settle
+            // into its own slack. The previous behaviour matched the final approach to
+            // the axis' history, which created two stable regimes - an interrupted plan
+            // or a manual nudge could flip a rig into the approach-down mirror and keep
+            // it there (field log, 2026-08-11).
             var plan = Plan(OapaBacklashMode.Unidirectional, -10f, LastDirection.Positive);
             System.Math.Sign(plan[^1]).Should().Be(1);
+            Arrive(plan, B, LastDirection.Positive).Should().BeApproximately(-10f, 0.001f);
 
-            var mirrored = Plan(OapaBacklashMode.Unidirectional, 10f, LastDirection.Negative);
-            System.Math.Sign(mirrored[^1]).Should().Be(-1);
-            Arrive(mirrored, B, LastDirection.Negative).Should().BeApproximately(10f, 0.001f);
+            // A positive move from a negative engagement re-engages in one compensated
+            // leg - it already arrives travelling positive, no excursion needed.
+            var recovering = Plan(OapaBacklashMode.Unidirectional, 10f, LastDirection.Negative);
+            recovering.Should().Equal(10f + B);
+            System.Math.Sign(recovering[^1]).Should().Be(1);
+            Arrive(recovering, B, LastDirection.Negative).Should().BeApproximately(10f, 0.001f);
+
+            // A negative move that is NOT a reversal still overshoots below and arrives
+            // from underneath: the outward leg pays no reversal, only the margin.
+            var pinned = Plan(OapaBacklashMode.Unidirectional, -10f, LastDirection.Negative);
+            pinned.Should().Equal(-(10f + O), B + O);
+            System.Math.Sign(pinned[^1]).Should().Be(1);
+            Arrive(pinned, B, LastDirection.Negative).Should().BeApproximately(-10f, 0.001f);
         }
 
         [Test]
@@ -166,11 +181,35 @@ namespace NINA.Plugins.PolarAlignment.Test {
         }
 
         [Test]
-        public void OneSidedPlay_NeedsNoCompensation_EnteringTheFreeDirection() {
-            // A gravity-loaded axis can lose essentially nothing one way: a plain move
-            // already lands exactly, and inventing an excursion would only cost time.
-            BacklashModePlanner.PlanMoves(OapaBacklashMode.Unidirectional, -15f, 40f, 0f, LastDirection.Positive)
-                .Should().Equal(new[] { -15f });
+        public void OneSidedPlay_TheFreeDirectionPaysNothing_ButTheArrivalStaysFromBelow() {
+            // A gravity-loaded axis can lose essentially nothing one way. The outward
+            // (free) leg then carries no compensation at all - but the move still arrives
+            // from underneath, because resting loaded on the same flank every time is the
+            // mode's contract, and the return leg pays the entering-positive play it
+            // actually crosses. Margin: 0.25 * max(pair) + 0.5' = 10.5'.
+            var plan = BacklashModePlanner.PlanMoves(OapaBacklashMode.Unidirectional, -15f, 40f, 0f, LastDirection.Positive);
+
+            plan.Should().Equal(new[] { -15f - 10.5f, 40f + 10.5f });
+            Travel(plan, lostEnteringPositive: 40f, lostEnteringNegative: 0f, LastDirection.Positive)
+                .Should().BeApproximately(-15f, 0.01f);
+        }
+
+        [Test]
+        public void Unidirectional_EveryCombinationOfSignAndEngagement_EndsTravellingPositive_AndArrivesExactly() {
+            // The rc17 contract, exhaustively: whatever the move direction, whatever the
+            // engagement history, whatever the (measurable) pair - the last commanded leg
+            // is positive and the physical arrival equals the request.
+            foreach (var move in new[] { -12f, -0.2f, +0.3f, +9f }) {
+                foreach (var last in new[] { LastDirection.Positive, LastDirection.Negative }) {
+                    foreach (var (lp, ln) in new[] { (8f, 8f), (16f, 55f), (40f, 0f), (0f, 12f) }) {
+                        var plan = BacklashModePlanner.PlanMoves(OapaBacklashMode.Unidirectional, move, lp, ln, last);
+                        System.Math.Sign(plan[^1]).Should().Be(1,
+                            $"move={move}, last={last}, pair=({lp},{ln}): the axis must always rest engaged positive");
+                        Travel(plan, lp, ln, last).Should().BeApproximately(move, 0.01f,
+                            $"move={move}, last={last}, pair=({lp},{ln})");
+                    }
+                }
+            }
         }
 
         [Test]

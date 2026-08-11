@@ -9,22 +9,65 @@ namespace NINA.Plugins.PolarAlignment.Test {
 
     public class OapaCalibrationGeometryTest {
 
-        private static CalibrationSolveSample Sample(double raDeg, double decDeg, double altDeg = 30, double azDeg = 100) =>
+        private static CalibrationSolveSample Sample(double raDeg, double decDeg, double altDeg = 30, double azDeg = 0) =>
             new(raDeg, decDeg, altDeg, azDeg);
 
         [Test]
-        public void SignedDisplacement_AltitudeAxis_TransfersOneToOne() {
+        public void SignedDisplacement_AltitudeAxis_TowardNorth_TransfersOneToOne() {
             var a = Sample(10, 0, altDeg: 60);
             var b = Sample(10, 0.5, altDeg: 60.5);
             OapaCalibrationGeometry.SignedAxisDisplacementArcmin(isAzimuthAxis: false, a, b).Should().BeApproximately(30.0, 0.01);
         }
 
         [Test]
-        public void SignedDisplacement_AzimuthAxis_CorrectsForCosAltitude() {
-            // At altitude 60°, cos(alt)=0.5: a 30' azimuth sky displacement means 60' of axis motion.
-            var a = Sample(10, 0, altDeg: 60, azDeg: 100.0);
-            var b = Sample(10, 0.5, altDeg: 60, azDeg: 100.5);
-            OapaCalibrationGeometry.SignedAxisDisplacementArcmin(isAzimuthAxis: true, a, b).Should().BeApproximately(60.0, 0.05);
+        public void SignedDisplacement_AltitudeAxis_DividesByTheFieldAzimuthProjection() {
+            // The altitude actuator tilts about the horizontal east-west axis: a field at
+            // azimuth 137.2° shows only cos(137.2°) = -0.734 of the tilt in its altitude.
+            // 30' of measured (negative) altitude displacement therefore means ~40.9' of
+            // positive axis motion. This is the exact geometry of the field session whose
+            // altitude factor came out 202.7 for a mechanism that delivered 85.
+            var a = Sample(10, 0, altDeg: 58.0, azDeg: 137.2);
+            var b = Sample(10, -0.5, altDeg: 57.5, azDeg: 137.2);
+            OapaCalibrationGeometry.SignedAxisDisplacementArcmin(isAzimuthAxis: false, a, b)
+                .Should().BeApproximately(30.0 / Math.Cos(137.2 * Math.PI / 180.0) * -1.0, 0.1);
+        }
+
+        [Test]
+        public void SignedDisplacement_AltitudeAxis_SouthOfEastWest_ReversesTheSign() {
+            // Toward the south meridian the projection is -1: the same axis motion moves the
+            // field's altitude the opposite way. The signed division keeps the *axis* sign
+            // stable across the sky, so the Reverse flag stays a property of the wiring.
+            var north = OapaCalibrationGeometry.SignedAxisDisplacementArcmin(isAzimuthAxis: false,
+                Sample(10, 0, altDeg: 46, azDeg: 0), Sample(10, 0.5, altDeg: 46.5, azDeg: 0));
+            var south = OapaCalibrationGeometry.SignedAxisDisplacementArcmin(isAzimuthAxis: false,
+                Sample(10, 0, altDeg: 46, azDeg: 180), Sample(10, 0.5, altDeg: 45.5, azDeg: 180));
+            north.Should().BeApproximately(30.0, 0.01);
+            south.Should().BeApproximately(30.0, 0.01,
+                "a field dropping south of the mount is the same axis motion as a field rising north of it");
+        }
+
+        [Test]
+        public void SignedDisplacement_AltitudeAxis_ProjectionIsFlooredForRestorePaths() {
+            // Restore paths may run from a pointing the calibration itself would refuse; the
+            // division must stay bounded rather than explode toward due east/west.
+            var a = Sample(10, 0, altDeg: 45, azDeg: 90.0);
+            var b = Sample(10, 0, altDeg: 45.5, azDeg: 90.0);
+            var d = OapaCalibrationGeometry.SignedAxisDisplacementArcmin(isAzimuthAxis: false, a, b);
+            Math.Abs(d).Should().BeLessThanOrEqualTo(30.0 / OapaCalibrationGeometry.MinimumAltitudeCosAzimuth + 0.1);
+        }
+
+        [Test]
+        public void SignedDisplacement_AzimuthAxis_TransfersTheCoordinateDelta_AtAnyAltitude() {
+            // A base rotation about the vertical shifts every field's azimuth *coordinate* by
+            // the rotation itself, regardless of altitude. The former cos(alt) division
+            // converted to an on-sky angle instead, scaling every azimuth factor by
+            // cos(field alt) — a silent 0.53 gain on a rig calibrating at alt 58°.
+            var low = OapaCalibrationGeometry.SignedAxisDisplacementArcmin(isAzimuthAxis: true,
+                Sample(10, 0, altDeg: 10, azDeg: 100.0), Sample(10, 0.5, altDeg: 10, azDeg: 100.5));
+            var high = OapaCalibrationGeometry.SignedAxisDisplacementArcmin(isAzimuthAxis: true,
+                Sample(10, 0, altDeg: 60, azDeg: 100.0), Sample(10, 0.5, altDeg: 60, azDeg: 100.5));
+            low.Should().BeApproximately(30.0, 0.05);
+            high.Should().BeApproximately(30.0, 0.05, "the coordinate delta is the axis motion at any altitude");
         }
 
         [Test]
@@ -42,6 +85,16 @@ namespace NINA.Plugins.PolarAlignment.Test {
             var b = Sample(10, -0.5, altDeg: 29.25);
             OapaCalibrationGeometry.SignedDisplacementMatchesCommand(isAzimuthAxis: false, a, b, 45f).Should().BeFalse();
             OapaCalibrationGeometry.SignedDisplacementMatchesCommand(isAzimuthAxis: false, a, b, -45f).Should().BeTrue();
+        }
+
+        [Test]
+        public void SignedDisplacement_AHealthyAxisPointedSouthOfEast_IsNotMistakenForAReversedOne() {
+            // The trap the signed projection exists for: at azimuth 137° a healthy axis
+            // lowers the field's altitude on a positive command. Reading that raw would
+            // flip the Reverse flag on every calibration done on that side of the sky.
+            var a = Sample(10, 0, altDeg: 58, azDeg: 137.2);
+            var b = Sample(10, -0.5, altDeg: 57.75, azDeg: 137.2);
+            OapaCalibrationGeometry.SignedDisplacementMatchesCommand(isAzimuthAxis: false, a, b, 45f).Should().BeTrue();
         }
 
         [Test]
@@ -102,7 +155,7 @@ namespace NINA.Plugins.PolarAlignment.Test {
 
             public Task<CalibrationSolveSample> CaptureAndSolve(CancellationToken token) {
                 return Task.FromResult(new CalibrationSolveSample(
-                    10.0, physicalPositionArcmin / 60.0, 30.0 + physicalPositionArcmin / 60.0, 100.0));
+                    10.0, physicalPositionArcmin / 60.0, 30.0 + physicalPositionArcmin / 60.0, 0.0));
             }
 
             /// <summary>Where the axis physically sits, in arcminutes from its start.</summary>
@@ -234,7 +287,7 @@ namespace NINA.Plugins.PolarAlignment.Test {
             }
             public Task<CalibrationSolveSample> CaptureAndSolve(CancellationToken token) {
                 return Task.FromResult(new CalibrationSolveSample(
-                    10.0, physicalPositionArcmin / 60.0, 30.0 + physicalPositionArcmin / 60.0, 100.0));
+                    10.0, physicalPositionArcmin / 60.0, 30.0 + physicalPositionArcmin / 60.0, 0.0));
             }
         }
 

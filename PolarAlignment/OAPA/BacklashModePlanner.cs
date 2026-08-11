@@ -32,6 +32,17 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
     /// a two-leg plan land exactly: the overshoot leg pays one transition and the return
     /// leg pays the other, and they cancel only when each is given its own number. Passing
     /// one value for both directions reproduces the symmetric behaviour exactly.
+    ///
+    /// The cost of that exactness is a sharp dependence on the *difference* between the two
+    /// numbers, which the single-value form does not have. A Unidirectional plan commands a
+    /// net travel of <c>move - outward + back</c>; the missing part is supposed to be eaten
+    /// by real play, so if the mechanism's play is smaller than configured, the gap between
+    /// the pair lands as a fixed bias on every reversal. It follows that the axis cannot be
+    /// corrected by less than that gap, and that requests below it move the axis the *wrong
+    /// way*. Two field rigs stalled at exactly their configured gap, 9.3' and 7.3'. A wrong
+    /// difference is therefore worse than a wrong average, and the pair must only be split
+    /// when the difference is established - which is what the calibration's directionality
+    /// verdict decides before the values ever reach here.
     /// </summary>
     public static class BacklashModePlanner {
 
@@ -66,12 +77,51 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
             var sign = Math.Sign(move);
             var lastSign = lastDirection == LastDirection.Positive ? 1 : -1;
 
-            // The move itself reverses into `sign`, so it pays that direction's play; a
-            // return leg travels the other way and pays the other direction's.
-            var outward = sign > 0 ? backlashEnteringPositive : backlashEnteringNegative;
-            var back = sign > 0 ? backlashEnteringNegative : backlashEnteringPositive;
+            if (sign == 0 || mode == OapaBacklashMode.Off) {
+                return new[] { move };
+            }
 
-            if (sign == 0 || sign == lastSign || outward <= 0f || mode == OapaBacklashMode.Off) {
+            if (mode == OapaBacklashMode.Unidirectional) {
+                // True unidirectional approach: EVERY move arrives travelling in the
+                // positive direction, and the axis rests engaged positive afterwards.
+                // On the altitude axis positive is "up", so the gears are always loaded
+                // against gravity at rest and the mechanism cannot settle into its own
+                // slack after a move (a tester watched exactly that creep). It also makes
+                // the arrival mechanically identical every time - same flank, same
+                // direction - so a compensation error becomes a constant offset the
+                // adaptive controller can learn, instead of a sign-alternating one it
+                // cannot. The previous behaviour had two stable regimes (approach-up and
+                // approach-down) selected by history: an interrupted plan or a manual
+                // nudge could flip a rig into the mirrored regime and keep it there.
+                if (backlashEnteringPositive <= 0f && backlashEnteringNegative <= 0f) {
+                    return new[] { move }; // no measurable play: nothing to protect
+                }
+                if (sign > 0) {
+                    if (lastSign > 0) {
+                        return new[] { move }; // already approaching positively
+                    }
+                    // Engaged negative (interrupted plan, manual nudge): one compensated
+                    // leg re-engages and arrives travelling positive.
+                    return backlashEnteringPositive > 0f
+                        ? new[] { move + backlashEnteringPositive }
+                        : new[] { move };
+                }
+                // Negative move: overshoot below the target, then arrive from underneath.
+                // The overshoot cancels between the legs whatever its size, so it is sized
+                // off the larger transition purely as margin against an underestimate; the
+                // outward leg pays the entering-negative play only when it actually
+                // reverses into it, and the return leg always pays the entering-positive one.
+                var uniOvershoot = OvershootFractionOfBacklash * Math.Max(Math.Max(backlashEnteringPositive, backlashEnteringNegative), 0f) + OvershootFloorArcmin;
+                var reversalPlay = lastSign > 0 ? Math.Max(0f, backlashEnteringNegative) : 0f;
+                return new[] {
+                    move - reversalPlay - uniOvershoot,
+                    Math.Max(0f, backlashEnteringPositive) + uniOvershoot
+                };
+            }
+
+            // Soft and Full compensate only actual reversals, in the move's own direction.
+            var outward = sign > 0 ? backlashEnteringPositive : backlashEnteringNegative;
+            if (sign == lastSign || outward <= 0f) {
                 return new[] { move };
             }
 
@@ -80,15 +130,6 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
                     return new[] { move + sign * SoftFraction * outward };
                 case OapaBacklashMode.Full:
                     return new[] { move + sign * outward };
-                case OapaBacklashMode.Unidirectional:
-                    // The overshoot cancels between the legs whatever its size, so it is
-                    // sized off the larger transition purely as margin against an
-                    // underestimate; each leg still carries its own direction's play.
-                    var overshoot = OvershootFractionOfBacklash * Math.Max(outward, back) + OvershootFloorArcmin;
-                    return new[] {
-                        move + sign * (outward + overshoot),
-                        -sign * (back + overshoot)
-                    };
                 default:
                     return new[] { move };
             }

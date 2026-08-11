@@ -133,9 +133,17 @@ namespace NINA.Plugins.PolarAlignment {
         private float YPosition { get; set; }
         private float ZPosition { get; set; }
 
-        public LastDirection XLastDirection { get; private set; } = LastDirection.Positive;
-        public LastDirection YLastDirection { get; private set; } = LastDirection.Positive;
-        public LastDirection ZLastDirection { get; private set; } = LastDirection.Positive;
+        // The side of the play each axis sits on belongs to the mechanism, not to this
+        // object: the alignment instruction builds a new one on every Execute while the
+        // hardware keeps its position. See AxisEngagementState.
+        private string EngagementKey => GetType().Name;
+
+        public LastDirection XLastDirection => AxisEngagementState.Get(EngagementKey, Axis.XAxis);
+        public LastDirection YLastDirection => AxisEngagementState.Get(EngagementKey, Axis.YAxis);
+        public LastDirection ZLastDirection => AxisEngagementState.Get(EngagementKey, Axis.ZAxis);
+
+        private void RecordEngagement(Axis axis, float signedMove)
+            => AxisEngagementState.Set(EngagementKey, axis, signedMove >= 0 ? LastDirection.Positive : LastDirection.Negative);
 
         public float XPosition1 { get => XPosition / XGearRatio; }
         public float YPosition1 { get => YPosition / YGearRatio; }
@@ -201,11 +209,7 @@ namespace NINA.Plugins.PolarAlignment {
                 var commandedSteps = position * gearRatio;
                 var target = RoundTarget(checkProperty() + commandedSteps);
 
-                switch (axis) {
-                    case Axis.XAxis: XLastDirection = position >= 0 ? LastDirection.Positive : LastDirection.Negative; break;
-                    case Axis.YAxis: YLastDirection = position >= 0 ? LastDirection.Positive : LastDirection.Negative; break;
-                    case Axis.ZAxis: ZLastDirection = position >= 0 ? LastDirection.Positive : LastDirection.Negative; break;
-                }
+                RecordEngagement(axis, position);
 
                 var command = $"$J=G91G21{axisCommand}{commandedSteps.ToString(CultureInfo.InvariantCulture)}F{speed.ToString(CultureInfo.InvariantCulture)}";
                 Logger.Info($"Sending command: {command}");
@@ -284,11 +288,12 @@ namespace NINA.Plugins.PolarAlignment {
                 var rawTarget = position * gearRatio;
                 var target = RoundTarget(rawTarget);
 
-                switch (axis) {
-                    case Axis.XAxis: XLastDirection = position - XPosition1 >= 0 ? LastDirection.Positive : LastDirection.Negative; break;
-                    case Axis.YAxis: YLastDirection = position - YPosition1 >= 0 ? LastDirection.Positive : LastDirection.Negative; break;
-                    case Axis.ZAxis: ZLastDirection = position - ZPosition1 >= 0 ? LastDirection.Positive : LastDirection.Negative; break;
-                }
+                var travel = axis switch {
+                    Axis.XAxis => position - XPosition1,
+                    Axis.YAxis => position - YPosition1,
+                    _ => position - ZPosition1,
+                };
+                RecordEngagement(axis, travel);
 
                 var command = $"$J=G53{axisCommand}{rawTarget.ToString(CultureInfo.InvariantCulture)}F{speed.ToString(CultureInfo.InvariantCulture)}";
                 Logger.Info($"Sending command: {command}");

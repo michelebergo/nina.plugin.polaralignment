@@ -1,12 +1,5 @@
 # Changelog
 
-## Version 2.2.7.0 (beta rc17.2)
-- **A calibration failure can no longer leave the platform silently displaced.** Whether a restore is needed is now tracked as a fact ("has the axis physically moved?") instead of being inferred from the commanded sum — with backlash, the sum returns to zero while the mechanism is still off its baseline, and a failure at that exact moment used to skip the restore entirely.
-- **"Measured" and "back at the start" are now two separate claims.** If the closing moves fail, can't be verified, or leave an out-of-tolerance residual, the calibration keeps its measured factors but reports plainly that the platform did not verifiably return to its starting position (panel status, warning notification, and log all say so, with the residual). Previously this was published as plain success.
-- **Cancelling during the closing phase stays a cancellation** — the best-effort restore still runs, but the run reports "Cancelled" instead of being converted into an apparent success.
-- Both issues were identified by Stefan Berg reviewing the upstream self-calibration PR; fixed here first so the release-candidate track is clean.
-- Firmware unchanged (1.2.2). No re-calibration required.
-
 ## Version 2.2.7.0 (beta rc17.1)
 - **The calibration no longer mistakes sidereal sky rotation for platform motion.** Every sample used to be transformed to Alt/Az at its own wall-clock time; a tracked field keeps its RA/Dec while its Alt/Az drifts with sidereal time, so that drift leaked into every displacement comparison — mildly into the measured responses, and heavily into the closing moves against a minutes-old baseline, whose phantom residual no iteration could remove. That is the `closing iterations exhausted` residual two rigs kept logging (0.6' on a fast calibration, 5' on a slow one). All samples of a calibration pass are now expressed at one frozen reference epoch — the pass's first solve — so a displacement means axis motion and nothing else. Credit: found by Stefan Berg reviewing the upstream self-calibration PR.
 - Expect visibly smaller closing residuals after calibration, and slightly cleaner response/backlash figures on slow rigs. No re-calibration required, though the next one you run will simply be a little more accurate.
