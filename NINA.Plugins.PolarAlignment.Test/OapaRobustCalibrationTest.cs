@@ -254,6 +254,78 @@ namespace NINA.Plugins.PolarAlignment.Test {
             outcome.BacklashEnteringPositiveArcmin.Should().Be(outcome.BacklashArcmin);
         }
 
+        /// <summary>
+        /// Mechanism for the travel-budget tests: responds with a fixed scale and,
+        /// optionally, creeps a fixed amount further on every move (a slipping clutch, a
+        /// platform settling under load) - motion the commanded sum knows nothing about.
+        /// </summary>
+        private sealed class RunawayFakeAxis : IOapaCalibrationMotion, IOapaCalibrationSolver {
+            private readonly double scale;
+            private readonly double creepPerMoveArcmin;
+            private double physical;
+            public float LargestCommandArcmin { get; private set; }
+
+            public RunawayFakeAxis(double scale, double creepPerMoveArcmin = 0) {
+                this.scale = scale;
+                this.creepPerMoveArcmin = creepPerMoveArcmin;
+            }
+
+            public Task MoveRelative(Axis axis, float arcmin, CancellationToken token) {
+                LargestCommandArcmin = Math.Max(LargestCommandArcmin, Math.Abs(arcmin));
+                physical += arcmin * scale + creepPerMoveArcmin;
+                return Task.CompletedTask;
+            }
+
+            public Task<CalibrationSolveSample> CaptureAndSolve(CancellationToken token) {
+                return Task.FromResult(new CalibrationSolveSample(10.0, physical / 60.0, 30.0 + physical / 60.0, 0.0));
+            }
+        }
+
+        [Test]
+        public async Task AnAxisThatKeepsCreepingAway_IsStoppedAtTheTravelBudget() {
+            // Every move drags the platform 60' further than commanded. The commanded sum
+            // stays small, so only a budget measured on the sky can see the runaway: the
+            // calibration must abort before the platform is driven into its travel limit.
+            var axis = new RunawayFakeAxis(scale: 1.0, creepPerMoveArcmin: 60.0);
+            var service = new OapaCalibrationService(axis, axis);
+
+            var act = () => service.CalibrateAxisWithAutoReverse(Axis.YAxis, 100f, false, "Y", null, CancellationToken.None);
+
+            await act.Should().ThrowAsync<InvalidOperationException>()
+                .WithMessage("*travel budget*", "the abort must say why, in terms of protecting the axis travel");
+        }
+
+        [Test]
+        public async Task AFaintResponse_NeverProducesAMonsterLeg() {
+            // The legs self-scale to the measured response, so a 0.04 response would ask
+            // for a 200' leg. One command that large is not a measurement any more - it
+            // is three degrees of travel bet on a single number. The cap bounds every
+            // commanded move at the same three-steps limit the closing moves use.
+            var axis = new RunawayFakeAxis(scale: 0.04);
+            var service = new OapaCalibrationService(axis, axis);
+
+            var outcome = await service.CalibrateAxisWithAutoReverse(Axis.YAxis, 100f, false, "Y", null, CancellationToken.None);
+
+            axis.LargestCommandArcmin.Should().BeLessThanOrEqualTo(135f);
+            outcome.Ratio.Should().BeApproximately(2500f, 250f, "the factor is still recovered from the capped legs");
+        }
+
+        [Test]
+        public async Task GilasCase_SuspectResponses_TakeTheFactorFromTheStrongDirection() {
+            // Field case: an axis losing steps against gravity responded 0.199 forward
+            // and 0.958 in reverse. A factor error is a scale - it affects both
+            // directions identically - so a 5x disagreement means the weak direction is
+            // measuring a malfunction, not the scale. The old mean produced a factor
+            // 1.7x too large, and recalibrating on top of it compounded to 3.6x.
+            var axis = new RobustFakeAxis(forwardScale: 0.2, reverseScale: 0.96);
+
+            var outcome = await Calibrate(axis);
+
+            outcome.ResponseSuspect.Should().BeTrue();
+            outcome.Ratio.Should().BeApproximately(100f / 0.96f, 6f,
+                "the strong direction is within a few percent of the true scale; the mean would be off by ~70%");
+        }
+
         [Test]
         public async Task ValoCase_ZeroAgainstLarge_IsCollapsedToTheMean_NotSplit() {
             // Field case, twice on the same rig: an axis that measured 4.10'/4.31'

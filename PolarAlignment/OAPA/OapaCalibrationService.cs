@@ -166,6 +166,7 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
             // verified restore may clear the need for one.
             var needsRestore = false;
             CalibrationSolveSample last = default;
+            CalibrationSolveSample baseline = default;
 
             // Freeze the solver's topocentric epoch for this pass: displacements between
             // samples must measure axis motion only, not the sidereal drift of a tracked
@@ -194,6 +195,20 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
                 var now = await NextSolve().ConfigureAwait(false);
                 var d = OapaCalibrationGeometry.SignedAxisDisplacementArcmin(isAzimuth, last, now);
                 last = now;
+
+                // Travel budget, measured on the sky rather than on the commanded sum: a
+                // wrong factor makes commanded arcminutes meaningless as a bound, but the
+                // solve always knows how far from the start the axis really is. This is
+                // the backstop for the pathological cases the self-scaling legs cannot
+                // absorb (stick-slip that fools the probe, a runaway response) before the
+                // platform is driven toward its mechanical travel limit.
+                var excursion = OapaCalibrationGeometry.SignedAxisDisplacementArcmin(isAzimuth, baseline, now);
+                var budget = MaxExcursionSteps * calibrationStepArcmin;
+                if (Math.Abs(excursion) > budget) {
+                    throw new InvalidOperationException(
+                        $"{axisLabel}: calibration exceeded its travel budget ({excursion:F0}' from the start, budget ±{budget:F0}'); " +
+                        "aborting to protect the axis travel. Check that the axis moves freely and that the factor is plausible.");
+                }
                 return d;
             }
 
@@ -201,7 +216,7 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
             // against a threshold derived from it (fail fast on an unsolvable field too).
             reportStatus?.Invoke($"{axisLabel}: measuring solve noise...");
             var s0a = await NextSolve().ConfigureAwait(false);
-            var baseline = await NextSolve().ConfigureAwait(false);
+            baseline = await NextSolve().ConfigureAwait(false);
             var noise = Math.Abs(OapaCalibrationGeometry.SignedAxisDisplacementArcmin(isAzimuth, s0a, baseline));
             var threshold = Math.Max(NoiseSigmaFactor * noise, DetectionFloorArcmin);
             last = baseline;
@@ -250,7 +265,12 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
                 // S2: clean forward legs. Post-engagement, same direction: backlash-free by
                 // construction. The leg size targets a fixed physical displacement so the
                 // measurement scales itself to whatever the current ratio error is.
-                var legLogical = (float)Math.Max(1.0, TargetCleanLegPhysicalArcmin / roughResponse);
+                // The leg self-scales to the measured response, so a barely-responding
+                // probe would ask for an unbounded logical leg (8'/0.04 = 200'). Cap every
+                // single commanded leg at the same bound the closing moves already use:
+                // a leg that large means the response measurement is not to be trusted,
+                // not that the axis should be driven three degrees in one command.
+                var legLogical = (float)Math.Min(3.0 * calibrationStepArcmin, Math.Max(1.0, TargetCleanLegPhysicalArcmin / roughResponse));
                 reportStatus?.Invoke($"{axisLabel}: forward legs ({legLogical:F0}')...");
                 var beforeLeg = last;
                 var f1 = await MoveAndMeasure(legLogical, +1f).ConfigureAwait(false);
@@ -385,8 +405,18 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
 
                 var meanResponse = (forwardResponse + reverseResponse) / 2.0;
 
+                // A factor error is a scale: it affects both directions identically. Two
+                // responses that disagree by more than the agreement floor are therefore
+                // not two measurements of the scale - the weaker direction is losing
+                // motion mechanically (stall, slip, insufficient torque) and blending it
+                // in poisons the factor. Field case: responses 0.199/0.958 blended into a
+                // factor 1.7x too large, and recalibrating on top of that compounded it to
+                // 3.6x, while the strong direction alone was within a few percent of the
+                // truth. When the pair is suspect, the strong direction IS the scale.
+                var scaleResponse = responseSuspect ? Math.Max(forwardResponse, reverseResponse) : meanResponse;
+
                 var result = new AxisCalibrationResult {
-                    Ratio = (float)(currentRatio / meanResponse),
+                    Ratio = (float)(currentRatio / scaleResponse),
                     ForwardRatio = (float)(currentRatio / forwardResponse),
                     ReverseRatio = (float)(currentRatio / reverseResponse),
                     BacklashArcmin = (float)backlash,
@@ -539,5 +569,13 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
 
         /// <summary>Residuals below this are indistinguishable from solve noise and left alone.</summary>
         private const float RestoreToleranceArcmin = 0.5f;
+
+        /// <summary>
+        /// Travel budget as a multiple of the calibration step: the measured excursion
+        /// from the baseline may never exceed this (4 x 45' = 3° by default). Escalated
+        /// backlash legs on high-play rigs legitimately reach ~2° of round trip; anything
+        /// beyond this is a malfunction, not a measurement.
+        /// </summary>
+        private const float MaxExcursionSteps = 4f;
     }
 }

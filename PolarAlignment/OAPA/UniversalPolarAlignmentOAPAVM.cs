@@ -760,7 +760,7 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
                         var details = new List<string>();
                         if (x.ResponseSuspect) { details.Add($"X forward {x.ForwardRatio:F1} / reverse {x.ReverseRatio:F1}"); }
                         if (y.ResponseSuspect) { details.Add($"Y forward {y.ForwardRatio:F1} / reverse {y.ReverseRatio:F1}"); }
-                        consistencyMsg += $" ⛔ The two directions disagree by more than a factor of two ({string.Join("; ", details)}), so the mean factor is wrong for both. Do not trust this pass: check that nothing is binding or hitting a travel limit and re-run the calibration.";
+                        consistencyMsg += $" ⛔ The two directions disagree by more than a factor of two ({string.Join("; ", details)}): the weaker one is losing motion (motor stall, slip, binding). The applied factor was taken from the stronger direction alone. Before re-running, check the run current and speed of this axis - a motor without torque margin loses steps against gravity.";
                     }
                     if (x.BacklashSuspect || y.BacklashSuspect) {
                         var axes = new List<string>();
