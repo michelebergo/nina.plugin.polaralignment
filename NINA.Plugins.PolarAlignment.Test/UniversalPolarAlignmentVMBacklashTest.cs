@@ -1,6 +1,7 @@
 using FluentAssertions;
 using NINA.Plugins.PolarAlignment.Avalon;
 using NINA.Plugins.PolarAlignment.OAPA;
+using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -13,9 +14,27 @@ namespace NINA.Plugins.PolarAlignment.Test {
     /// </summary>
     public class UniversalPolarAlignmentVMBacklashTest {
 
+        /// <summary>
+        /// Controller fake, optionally with real dead travel: on every direction change
+        /// the first <see cref="DeadbandArcmin"/> of commanded motion re-engages the
+        /// drivetrain and moves nothing. Starts engaged positive. With the default
+        /// deadband of zero it behaves as the plain recording fake.
+        /// </summary>
         private sealed class FakeSystem : IPolarAlignmentSystem {
             public readonly List<(Axis axis, float move)> RelativeMoves = new();
             public readonly List<(Axis axis, float target)> AbsoluteMoves = new();
+
+            public float DeadbandArcmin { get; }
+            public double PhysicalX { get; private set; }
+            public double PhysicalY { get; private set; }
+            private double engagementX;
+            private double engagementY;
+
+            public FakeSystem(float deadbandArcmin = 0f) {
+                DeadbandArcmin = deadbandArcmin;
+                engagementX = deadbandArcmin;
+                engagementY = deadbandArcmin;
+            }
 
             public bool Connected => true;
             public string Status => "Idle";
@@ -36,6 +55,8 @@ namespace NINA.Plugins.PolarAlignment.Test {
             }
 
             public Task MoveAbsolute(Axis axis, int speed, float position, CancellationToken token) {
+                // The fake models relative physics only; the absolute target is applied
+                // as a relative excursion of the commanded size for engagement purposes.
                 AbsoluteMoves.Add((axis, position));
                 Track(axis, position);
                 return Task.CompletedTask;
@@ -44,10 +65,28 @@ namespace NINA.Plugins.PolarAlignment.Test {
             private void Track(Axis axis, float signedMotion) {
                 var direction = signedMotion >= 0 ? LastDirection.Positive : LastDirection.Negative;
                 switch (axis) {
-                    case Axis.XAxis: XLastDirection = direction; break;
-                    case Axis.YAxis: YLastDirection = direction; break;
+                    case Axis.XAxis:
+                        (PhysicalX, engagementX) = Advance(PhysicalX, engagementX, signedMotion);
+                        XLastDirection = direction;
+                        break;
+                    case Axis.YAxis:
+                        (PhysicalY, engagementY) = Advance(PhysicalY, engagementY, signedMotion);
+                        YLastDirection = direction;
+                        break;
                     case Axis.ZAxis: ZLastDirection = direction; break;
                 }
+            }
+
+            private (double physical, double engagement) Advance(double physical, double engagement, double d) {
+                if (d > 0) {
+                    var eaten = Math.Min(DeadbandArcmin - engagement, d);
+                    return (physical + d - eaten, engagement + eaten);
+                }
+                if (d < 0) {
+                    var eaten = Math.Min(engagement, -d);
+                    return (physical - (-d - eaten), engagement - eaten);
+                }
+                return (physical, engagement);
             }
 
             public Task RefreshStatus(CancellationToken token) => Task.CompletedTask;
@@ -97,9 +136,11 @@ namespace NINA.Plugins.PolarAlignment.Test {
         }
 
         [Test]
-        public async Task MoveY_Absolute_KeepsTheLegacyClearingExcursion() {
+        public async Task MoveY_Absolute_RecoversTheReversalShortfall_WithASingleMove() {
             // The backlash modes govern relative nudges; absolute moves keep the legacy
-            // clear-after-move contract on every system.
+            // clear-after-move contract on every system. The clearing is a single further
+            // move in the new direction: the old zero-sum pair (−B, +B) reversed twice,
+            // paid the play on both legs, and physically recovered nothing.
             var (vm, system) = OapaVm(xCompensation: 3f, yCompensation: 5f);
 
             await vm.TryNudgeY(15, CancellationToken.None);
@@ -108,11 +149,33 @@ namespace NINA.Plugins.PolarAlignment.Test {
             vm.TargetPositionY = -100;
             await vm.MoveY(CancellationToken.None);
 
-            var expected = BacklashCompensationPlanner.CreateSequence(5f, LastDirection.Negative);
             system.AbsoluteMoves.Should().Equal((Axis.YAxis, -100f));
-            system.RelativeMoves.Should().Equal(
-                (Axis.YAxis, expected.FirstMove),
-                (Axis.YAxis, expected.SecondMove));
+            system.RelativeMoves.Should().Equal((Axis.YAxis, -5f));
+        }
+
+        [Test]
+        public async Task AvalonNudgeX_BothReversalDirections_PhysicallyLandOnTheTarget() {
+            // The legacy clearing path, against a mechanism with real dead travel equal
+            // to the configured compensation. What matters is where the axis ends up,
+            // not which commands were emitted: with the old zero-sum pair this test
+            // fails, because both of its legs are consumed by the play they reverse
+            // into and the reversal's shortfall survives.
+            var vm = new UniversalPolarAlignmentVM(null);
+            var system = new FakeSystem(deadbandArcmin: 3f);
+            vm.upa = system;
+            vm.ReverseAzimuth = false;
+            vm.XBacklashCompensation = 3f;
+
+            await vm.TryNudgeX(15, CancellationToken.None);
+            system.PhysicalX.Should().BeApproximately(15.0, 0.01, "no reversal yet: the axis starts engaged positive");
+
+            await vm.TryNudgeX(-15, CancellationToken.None);
+            system.PhysicalX.Should().BeApproximately(0.0, 0.01,
+                "positive-to-negative: the raw move travels 12', the single clearing move recovers the 3' the reversal lost");
+
+            await vm.TryNudgeX(15, CancellationToken.None);
+            system.PhysicalX.Should().BeApproximately(15.0, 0.01,
+                "negative-to-positive: the play is paid and recovered again on the way back");
         }
 
         [Test]

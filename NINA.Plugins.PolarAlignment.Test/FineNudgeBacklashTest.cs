@@ -1,3 +1,4 @@
+using System;
 using FluentAssertions;
 using NINA.Plugins.PolarAlignment.Avalon;
 using NINA.Plugins.PolarAlignment.OAPA;
@@ -59,7 +60,7 @@ namespace NINA.Plugins.PolarAlignment.Test {
 
         private static (Axis, float)[] BuildClearingSequence() {
             var sequence = BacklashCompensationPlanner.CreateSequence(5f, LastDirection.Negative);
-            return new[] { (Axis.XAxis, sequence.FirstMove), (Axis.XAxis, sequence.SecondMove) };
+            return Array.ConvertAll(sequence, move => (Axis.XAxis, move));
         }
 
         private static (T vm, FakeSystem system) Prepare<T>(T vm) where T : UniversalPolarAlignmentBaseVM {
