@@ -483,6 +483,73 @@ namespace NINA.Plugins.PolarAlignment.Test {
             result.Outcome.Should().NotBe(ReplayOutcome.TimedOut, $"true error stuck at {result.TrueFinalErrorArcmin:F2}'");
         }
 
+        // ----- Scenarios grounded in the raw log archive (Desktop/oapa_logs) -----
+
+        [Test]
+        public async Task GilasReal_20260804_FactorTenTimesOff_RecoversInOnePass_AndConverges() {
+            // gilas_20260804-212914: X measured responses fwd=9.907/rev=9.668 - the
+            // stored factor was TEN times off - with ~4.2' of play, noise 0.01'. The
+            // real night recovered ratio 10.22 in a single pass and the alignment
+            // finished at 0.39' (21 arcseconds). The replay must do the same.
+            var rig = new FieldRig { AzErrArcmin = 15.5, AltErrArcmin = -34.6, NoiseAmplitudeArcmin = 0.05 };
+            rig.X.ResponseFwd = 9.907; rig.X.ResponseRev = 9.668; rig.X.DeadbandArcmin = 4.2;
+            rig.Y.ResponseFwd = 1.53; rig.Y.ResponseRev = 1.85; rig.Y.DeadbandArcmin = 39;
+            rig.X.InitEngagement(); rig.Y.InitEngagement();
+
+            var x = await CalibrateAndApply(rig, rig.X);
+            rig.X.ResponseFwd.Should().BeApproximately(1.0, 0.1, "the 10x factor error must be recovered in one pass, as the real night did");
+
+            var y = await CalibrateAndApply(rig, rig.Y);
+            var result = RunAlignment(rig, x, y);
+            result.Outcome.Should().NotBe(ReplayOutcome.FalseSuccess, result.Reason);
+            result.Outcome.Should().NotBe(ReplayOutcome.TimedOut, $"true error stuck at {result.TrueFinalErrorArcmin:F2}'");
+        }
+
+        [Test]
+        public async Task ValoReal_20260806_SixteenDegreesOff_Converges() {
+            // valo_20260806-185035: initial error 16 degrees 33 arcmin (az -16.5 deg),
+            // healthy responses, moderate play. The real night finished at 0.15'. The
+            // largest initial error ever recorded in the archive - the loop must walk
+            // all of it down within the per-cycle correction cap.
+            var rig = new FieldRig { AzErrArcmin = -990, AltErrArcmin = 76.7, NoiseAmplitudeArcmin = 0.05 };
+            rig.X.ResponseFwd = 1.02; rig.X.ResponseRev = 0.97; rig.X.DeadbandArcmin = 3.3;
+            rig.Y.ResponseFwd = 1.10; rig.Y.ResponseRev = 1.05; rig.Y.DeadbandArcmin = 7.0;
+            rig.X.InitEngagement(); rig.Y.InitEngagement();
+
+            var x = await CalibrateAndApply(rig, rig.X);
+            var y = await CalibrateAndApply(rig, rig.Y);
+            var result = RunAlignment(rig, x, y);
+
+            result.Outcome.Should().Be(ReplayOutcome.Converged,
+                $"{result.Reason} (true error {result.TrueFinalErrorArcmin:F2}' after {result.Cycles} cycles)");
+        }
+
+        [Test]
+        public async Task AyhanReal_20260808_ResponseDoublePlusFiftyArcminPlay_EndsHonestly() {
+            // aylan_20260808: X responses ~1.9 with 50-63' of measured play - the real
+            // rig behind the synthetic 'grossly wrong factor' scenario. His night was
+            // messy but honest: a first inconsistent pass, retries, four justified
+            // halts, 4 degrees walked down to 13'. The replay accepts any honest
+            // ending - recovery-and-convergence or a protective abort - never a lie.
+            var rig = new FieldRig { AzErrArcmin = -256, AltErrArcmin = 43.5, NoiseAmplitudeArcmin = 0.08 };
+            rig.X.ResponseFwd = 1.958; rig.X.ResponseRev = 1.783; rig.X.DeadbandArcmin = 56;
+            rig.Y.ResponseFwd = 0.86; rig.Y.ResponseRev = 0.80; rig.Y.DeadbandArcmin = 5;
+            rig.X.InitEngagement(); rig.Y.InitEngagement();
+
+            AppliedAxis x;
+            try {
+                x = await CalibrateAndApply(rig, rig.X);
+            } catch (InvalidOperationException ex) {
+                ex.Message.Should().Contain("travel budget");
+                return; // honest protective abort
+            }
+            var y = await CalibrateAndApply(rig, rig.Y);
+            var result = RunAlignment(rig, x, y);
+
+            result.Outcome.Should().NotBe(ReplayOutcome.FalseSuccess,
+                $"(outcome {result.Outcome}, true error {result.TrueFinalErrorArcmin:F1}', {result.Reason})");
+        }
+
         // ----- Sidereal drift during calibration (rc17.1) -----
 
         [Test]
