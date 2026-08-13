@@ -395,6 +395,7 @@ namespace NINA.Plugins.PolarAlignment {
             if (Math.Abs(plan.XMagnitude) > 0) {
                 if (!await activeSystem.TryFineNudgeX((float)plan.XMagnitude, token)) {
                     automatedAdjustmentController.NoteFailedExecution();
+                    PauseIfControllerUnresponsive(activeSystem);
                     return;
                 }
                 executedX = plan.XMagnitude;
@@ -412,6 +413,7 @@ namespace NINA.Plugins.PolarAlignment {
                     }
 
                     automatedAdjustmentController.NoteFailedExecution();
+                    PauseIfControllerUnresponsive(activeSystem);
                     return;
                 }
                 executedY = plan.YMagnitude;
@@ -419,6 +421,22 @@ namespace NINA.Plugins.PolarAlignment {
 
             automatedAdjustmentController.NoteSuccessfulExecution(new AutomatedAdjustmentPlan(executedX, executedY, plan.IsProbe, plan.Reason));
             await CoreUtil.Wait(TimeSpan.FromSeconds(activeSystem.AutomatedAdjustmentSettleTime), token, progress, "Settling");
+        }
+
+        // A streak of failed move commands means the hardware is not listening (dead
+        // serial link, powered-off controller). Turning the automated-adjustments toggle
+        // off pauses the loop through its existing gate, keeps the error display alive
+        // for manual work, and leaves resuming a deliberate user action. The streak is
+        // reset so a resume gets a fresh three-strike budget (and a fresh notification).
+        private void PauseIfControllerUnresponsive(IPolarAlignmentSystemVM activeSystem) {
+            if (!automatedAdjustmentController.ExecutionUnresponsive) {
+                return;
+            }
+            automatedAdjustmentController.ResetExecutionFailureStreak();
+            Logger.Error("Automated adjustments paused: the adjustment hardware failed 3 consecutive move commands.");
+            Notification.ShowError("Automated adjustments paused: the adjustment hardware is not responding (3 failed moves in a row)." + Environment.NewLine +
+                                   "Check the controller connection (USB cable, power), then re-enable automated adjustments to resume.");
+            activeSystem.DoAutomatedAdjustments = false;
         }
 
         internal sealed class ErrorDetailComputation {

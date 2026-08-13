@@ -87,6 +87,37 @@ namespace NINA.Plugins.PolarAlignment.Test {
         }
 
         [Test]
+        public void ThreeConsecutiveFailedMoves_MarkTheHardwareUnresponsive() {
+            // One failed move is a hiccup; three in a row mean nobody is listening on
+            // the other end (dead serial link, powered-off controller) and the loop
+            // must stop commanding it - in the field it ground errors at a closed
+            // port until the user intervened.
+            var controller = new AutomatedAdjustmentController();
+
+            controller.NoteFailedExecution();
+            controller.NoteFailedExecution();
+            controller.ExecutionUnresponsive.Should().BeFalse("two failures are still within the hiccup budget");
+
+            controller.NoteFailedExecution();
+            controller.ExecutionUnresponsive.Should().BeTrue();
+
+            controller.ResetExecutionFailureStreak();
+            controller.ExecutionUnresponsive.Should().BeFalse("a resume starts with a fresh three-strike budget");
+        }
+
+        [Test]
+        public void ASuccessfulMove_ResetsTheFailureStreak() {
+            var controller = new AutomatedAdjustmentController();
+
+            controller.NoteFailedExecution();
+            controller.NoteFailedExecution();
+            controller.NoteSuccessfulExecution(new AutomatedAdjustmentPlan(1.0, 0.0, false, "test"));
+            controller.NoteFailedExecution();
+
+            controller.ExecutionUnresponsive.Should().BeFalse("failures separated by a success are hiccups, not a dead controller");
+        }
+
+        [Test]
         public void BacklashCompensationPlanner_RecoversTheShortfall_InTheTargetDirection() {
             // The move that reversed into the target direction fell short by the play it
             // crossed; the recovery is a single further move of the full compensation in

@@ -230,6 +230,7 @@ namespace NINA.Plugins.PolarAlignment {
         /// measured solve result before turning that move into a training sample.
         /// </summary>
         public void NoteSuccessfulExecution(AutomatedAdjustmentPlan plan) {
+            ConsecutiveFailedExecutions = 0;
             if (!hasObservation || !plan.HasMovement) {
                 return;
             }
@@ -241,8 +242,26 @@ namespace NINA.Plugins.PolarAlignment {
         /// Records that the last commanded move failed. Failed moves must not contribute
         /// to the learned actuator model.
         /// </summary>
+        /// <summary>
+        /// Consecutive move commands that failed to execute. One failure is a hiccup;
+        /// a streak means the adjustment hardware is not responding (dead serial link,
+        /// powered-off controller) and the correction loop should stop commanding it
+        /// instead of grinding errors until the user intervenes - the 22:33 field case,
+        /// where a USB dropout left the loop firing moves at a closed port.
+        /// </summary>
+        public int ConsecutiveFailedExecutions { get; private set; }
+
+        private const int MaxConsecutiveFailedExecutions = 3;
+
+        public bool ExecutionUnresponsive => ConsecutiveFailedExecutions >= MaxConsecutiveFailedExecutions;
+
+        public void ResetExecutionFailureStreak() {
+            ConsecutiveFailedExecutions = 0;
+        }
+
         public void NoteFailedExecution() {
             pendingPlan = null;
+            ConsecutiveFailedExecutions++;
         }
 
         private void AddSample(ResponseSample sample) {

@@ -168,10 +168,48 @@ namespace NINA.Plugins.PolarAlignment {
         // progress without corrupting the request/reply pairing on the port.
         private readonly object wireLock = new object();
 
+        /// <summary>Bounded recovery schedule for a serial link that dies mid-session.</summary>
+        private const int LinkReopenAttempts = 3;
+
+        /// <summary>
+        /// Base delay before a reopen attempt; attempt N waits N times this. The default
+        /// schedule (1s, 2s, 3s) covers the typical USB re-enumeration window. Virtual so
+        /// tests can collapse the waits.
+        /// </summary>
+        protected virtual int LinkReopenDelayMs => 1000;
+
+        private static bool IsLinkFailure(Exception ex)
+            => ex is InvalidOperationException || ex is System.IO.IOException || ex is UnauthorizedAccessException;
+
+        // The serial link can die mid-session - the field case is a USB re-enumeration
+        // under the EMI of a stalling stepper. One transaction retry after a successful
+        // reopen keeps a single dropout from failing the move and the whole correction
+        // loop with it; a link that stays dead still throws to the caller. Runs under
+        // wireLock, so the out-of-band stop waits out the recovery window - acceptable,
+        // because a dead link cannot deliver a stop either.
+        private T WithLinkRecovery<T>(Func<T> transaction) {
+            try {
+                return transaction();
+            } catch (Exception ex) when (IsLinkFailure(ex)) {
+                Logger.Warning($"{SystemName}: serial link failed ({ex.GetType().Name}: {ex.Message}); attempting to reopen the port");
+                for (var attempt = 1; attempt <= LinkReopenAttempts; attempt++) {
+                    Thread.Sleep(attempt * LinkReopenDelayMs);
+                    if (port.TryReopen()) {
+                        Logger.Info($"{SystemName}: serial link re-established (reopen attempt {attempt})");
+                        return transaction();
+                    }
+                    Logger.Warning($"{SystemName}: reopen attempt {attempt}/{LinkReopenAttempts} failed");
+                }
+                throw;
+            }
+        }
+
         protected string ExecuteWireCommand(string command) {
             lock (wireLock) {
-                port.WriteLine(command);
-                return port.ReadLine();
+                return WithLinkRecovery(() => {
+                    port.WriteLine(command);
+                    return port.ReadLine();
+                });
             }
         }
 
@@ -330,8 +368,10 @@ namespace NINA.Plugins.PolarAlignment {
         private void UpdateStatus() {
             string status;
             lock (wireLock) {
-                port.WriteLine("?");
-                status = ReadStatusLine(port);
+                status = WithLinkRecovery(() => {
+                    port.WriteLine("?");
+                    return ReadStatusLine(port);
+                });
             }
 
             var match = GetStatusRegex().Match(status);

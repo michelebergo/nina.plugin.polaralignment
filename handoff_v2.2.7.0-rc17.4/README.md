@@ -1,22 +1,16 @@
 # OAPA Beta — v2.2.7.0-rc17.4
 
-**One fix: the legacy backlash clearing (Avalon UPAS compensation path and absolute moves) now physically moves the mechanism.** Everything in rc17.3 and earlier stays. **Please don't redistribute firmware or plugin — still in beta.**
+**Three fixes: the session survives a USB-serial dropout, automated adjustments pause themselves when the controller stops responding, and the legacy backlash clearing now physically moves the mechanism.** Everything in rc17.3 and earlier stays. **Please don't redistribute firmware or plugin — still in beta.**
 
-> **Firmware unchanged (1.2.2)** — nothing to reflash. **No re-calibration required.** OAPA relative nudges (the ones the alignment loop uses) already went through the backlash modes and are unchanged — for most OAPA testers this build behaves identically to rc17.3.
+> **Firmware unchanged (1.2.2)** — nothing to reflash. **No re-calibration required.**
 
 ## What changed
 
-After a direction change, the clearing sequence used to send a zero-sum pair: −B then +B in the new direction. Both of those legs reverse — and are consumed by the very play they were supposed to clear. Net physical motion: zero. The reversal's shortfall stayed.
+**1. Serial dropout recovery.** If the USB-serial link dies mid-move (a stalling stepper makes exactly the kind of electrical noise that re-enumerates USB adapters), the plugin now reopens the port on a bounded schedule (1s/2s/3s) and repeats the interrupted transaction. A single dropout recovers invisibly; a controller that is really gone still fails, with the story in the log.
 
-The clearing is now a **single further move of the full compensation in the new direction**: it continues the motion (no new reversal, no new play paid) and recovers exactly what the reversal lost. Tests for this path now assert the final physical position against a dead-travel mechanism, in both reversal directions.
+**2. Self-pausing corrections.** Three consecutive failed move commands pause the automated adjustments with a clear notification — check the USB cable and power, then re-enable to resume. No more correction loop grinding errors at a dead port. The error display stays active for manual adjustment.
 
-Credit: identified by **Stefan Berg** in upstream review — the same sequence ships in the upstream plugin today.
-
-## Who should care
-
-- If you use the **Move (absolute) buttons** in the panel: those now land where they say.
-- Avalon UPAS users with backlash compensation set: the compensation now does something.
-- Everyone else: no behavioral change; this build is mainly a stability snapshot of the release-candidate track.
+**3. Legacy backlash clearing.** After a direction change, the old clearing sequence was a zero-sum pair (−B, +B): both legs were consumed by the very play they were supposed to clear — net physical motion zero. It is now a single further move in the new direction, recovering exactly what the reversal lost. (Identified by **Stefan Berg** in upstream review; affects the Avalon UPAS path and absolute moves — OAPA relative nudges already went through the backlash modes.)
 
 ## Install / update
 
