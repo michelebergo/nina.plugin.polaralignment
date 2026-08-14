@@ -1,5 +1,9 @@
 # Changelog
 
+## Version 2.2.7.0 (beta rc17.5)
+- **The shared backlash clearing now matches the upstream plugin (2.2.6.7) exactly.** Upstream replaced the old zero-sum clearing pair with a one-sided scheme: the axis is kept under a positive mechanical preload — a negative move is followed by an overtravel-and-return pair, a positive move needs no compensation, and the position counter returns to the commanded value. rc17.4's interim single-move clearing delivered the same physical arrival but left the position counter offset by the compensation and diverged from upstream; the beta now carries the upstream planner and its tests verbatim. Affects the Avalon UPAS compensation path and absolute moves on all systems; OAPA relative nudges keep their backlash modes unchanged.
+- Firmware unchanged (1.2.2). No re-calibration required.
+
 ## Version 2.2.7.0 (beta rc17.4)
 - **A serial dropout no longer kills the session.** When the USB-serial link dies mid-move (typically a USB re-enumeration under the electrical noise of a stalling stepper), the plugin now tries to reopen the port on a bounded schedule (1s/2s/3s) and repeats the interrupted transaction once — a single dropout recovers invisibly instead of surfacing "The port is closed" until the panel is reconnected by hand.
 - **Automated adjustments pause themselves when the hardware stops responding.** Three consecutive failed move commands now pause the automated corrections with a clear notification (check USB cable/power, re-enable to resume) instead of endlessly commanding a dead controller. The error display stays active for manual work, like the existing convergence halts.
