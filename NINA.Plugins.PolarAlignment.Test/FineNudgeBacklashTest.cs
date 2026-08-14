@@ -10,10 +10,11 @@ using System.Threading.Tasks;
 namespace NINA.Plugins.PolarAlignment.Test {
 
     /// <summary>
-    /// UPAS keeps the legacy backlash contract on every path - manual and automated
-    /// fine-approach nudges always clear with the out-and-back excursion on reversal.
-    /// OAPA routes both paths through its backlash-mode plan instead (the per-mode
-    /// behavior itself is covered in OapaBacklashModeVmTest).
+    /// UPAS keeps the shared upstream backlash contract on every path - manual and
+    /// automated fine-approach nudges restore the positive preload with the
+    /// overtravel-and-return pair after any negative movement. OAPA routes both paths
+    /// through its backlash-mode plan instead (the per-mode behavior itself is covered
+    /// in OapaBacklashModeVmTest).
     /// </summary>
     public class FineNudgeBacklashTest {
 
@@ -60,7 +61,7 @@ namespace NINA.Plugins.PolarAlignment.Test {
 
         private static (Axis, float)[] BuildClearingSequence() {
             var sequence = BacklashCompensationPlanner.CreateSequence(5f, LastDirection.Negative);
-            return Array.ConvertAll(sequence, move => (Axis.XAxis, move));
+            return new[] { (Axis.XAxis, sequence.FirstMove), (Axis.XAxis, sequence.SecondMove) };
         }
 
         private static (T vm, FakeSystem system) Prepare<T>(T vm) where T : UniversalPolarAlignmentBaseVM {

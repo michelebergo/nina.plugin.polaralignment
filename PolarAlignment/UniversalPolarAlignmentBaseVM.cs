@@ -157,15 +157,14 @@ namespace NINA.Plugins.PolarAlignment {
 
         /// <summary>
         /// Executes a relative move including the backlash handling. The base behavior is
-        /// the legacy contract shared by every system: move, then always clear backlash
-        /// with the out-and-back excursion on a direction reversal. OAPA overrides this
-        /// with its per-axis backlash-mode planning.
+        /// the shared upstream contract (2.2.6.7): the axis is kept under a positive
+        /// mechanical preload, so a negative move is followed by an overtravel-and-return
+        /// pair while a positive move needs no compensation. OAPA overrides this with its
+        /// per-axis backlash-mode planning.
         /// </summary>
         protected virtual async Task ExecuteRelativeMove(Axis axis, int speed, float position, CancellationToken token) {
-            var lastDirection = LastDirectionOf(axis);
             await upa.MoveRelative(axis, speed, position, token).ConfigureAwait(false);
-            var currentDirection = LastDirectionOf(axis);
-            await ClearBacklash(axis, speed, lastDirection, currentDirection, token);
+            await ClearBacklash(axis, speed, LastDirectionOf(axis), token);
         }
 
         protected LastDirection LastDirectionOf(Axis axis) {
@@ -189,11 +188,8 @@ namespace NINA.Plugins.PolarAlignment {
                 if (ReverseAzimuth) { target = target * -1; }
 
                 Logger.Info($"Moving {SystemName} along X axis to {target}");
-                var lastDirection = upa.XLastDirection;
-
                 await upa.MoveAbsolute(Axis.XAxis, XSpeed, target, token).ConfigureAwait(false);
-                var currentDirection = upa.XLastDirection;
-                await ClearBacklash(Axis.XAxis, XSpeed, lastDirection, currentDirection, token);
+                await ClearBacklash(Axis.XAxis, XSpeed, upa.XLastDirection, token);
             } catch (Exception ex) {
                 Logger.Error(ex);
                 if (ex is TimeoutException) {
@@ -213,16 +209,13 @@ namespace NINA.Plugins.PolarAlignment {
             return axis == Axis.XAxis ? XBacklashCompensation : 0f;
         }
 
-        private async Task ClearBacklash(Axis axis, int speed, LastDirection lastDirection, LastDirection currentDirection, CancellationToken token) {
-            if (lastDirection != currentDirection) {
-                var compensation = GetBacklashCompensation(axis);
-                if (Math.Abs(compensation) > 0) {
-                    Logger.Info($"Direction changed on {axis}. Clearing backlash");
-                    foreach (var move in BacklashCompensationPlanner.CreateSequence(compensation, currentDirection)) {
-                        await upa.MoveRelative(axis, speed, move, token).ConfigureAwait(false);
-                    }
-                }
-            }
+        private async Task ClearBacklash(Axis axis, int speed, LastDirection currentDirection, CancellationToken token) {
+            var sequence = BacklashCompensationPlanner.CreateSequence(GetBacklashCompensation(axis), currentDirection);
+            if (sequence.FirstMove == 0) { return; }
+
+            Logger.Info($"Clearing backlash on {axis} and restoring positive preload");
+            await upa.MoveRelative(axis, speed, sequence.FirstMove, token).ConfigureAwait(false);
+            await upa.MoveRelative(axis, speed, sequence.SecondMove, token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -248,10 +241,8 @@ namespace NINA.Plugins.PolarAlignment {
                 if (ReverseAltitude) { target = target * -1; }
 
                 Logger.Info($"Moving {SystemName} along Y axis to {target}");
-                var lastDirection = upa.YLastDirection;
                 await upa.MoveAbsolute(Axis.YAxis, YSpeed, target, token).ConfigureAwait(false);
-                var currentDirection = upa.YLastDirection;
-                await ClearBacklash(Axis.YAxis, YSpeed, lastDirection, currentDirection, token);
+                await ClearBacklash(Axis.YAxis, YSpeed, upa.YLastDirection, token);
             } catch (Exception ex) {
                 Logger.Error(ex);
                 if (ex is TimeoutException) {

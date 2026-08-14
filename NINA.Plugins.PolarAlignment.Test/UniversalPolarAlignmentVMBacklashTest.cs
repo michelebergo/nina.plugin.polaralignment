@@ -136,11 +136,10 @@ namespace NINA.Plugins.PolarAlignment.Test {
         }
 
         [Test]
-        public async Task MoveY_Absolute_RecoversTheReversalShortfall_WithASingleMove() {
-            // The backlash modes govern relative nudges; absolute moves keep the legacy
-            // clear-after-move contract on every system. The clearing is a single further
-            // move in the new direction: the old zero-sum pair (−B, +B) reversed twice,
-            // paid the play on both legs, and physically recovered nothing.
+        public async Task MoveY_Absolute_RestoresThePositivePreload_WithTheOvertravelPair() {
+            // The backlash modes govern relative nudges; absolute moves keep the shared
+            // upstream contract on every system: after a negative movement the axis is
+            // brought back under positive preload with an overtravel-and-return pair.
             var (vm, system) = OapaVm(xCompensation: 3f, yCompensation: 5f);
 
             await vm.TryNudgeY(15, CancellationToken.None);
@@ -150,16 +149,16 @@ namespace NINA.Plugins.PolarAlignment.Test {
             await vm.MoveY(CancellationToken.None);
 
             system.AbsoluteMoves.Should().Equal((Axis.YAxis, -100f));
-            system.RelativeMoves.Should().Equal((Axis.YAxis, -5f));
+            system.RelativeMoves.Should().Equal((Axis.YAxis, -5f), (Axis.YAxis, 5f));
         }
 
         [Test]
         public async Task AvalonNudgeX_BothReversalDirections_PhysicallyLandOnTheTarget() {
-            // The legacy clearing path, against a mechanism with real dead travel equal
+            // The shared clearing path, against a mechanism with real dead travel equal
             // to the configured compensation. What matters is where the axis ends up,
-            // not which commands were emitted: with the old zero-sum pair this test
-            // fails, because both of its legs are consumed by the play they reverse
-            // into and the reversal's shortfall survives.
+            // not which commands were emitted: the one-sided scheme keeps the axis under
+            // positive preload, so positive moves pay no play and negative moves are
+            // followed by the overtravel-and-return pair.
             var vm = new UniversalPolarAlignmentVM(null);
             var system = new FakeSystem(deadbandArcmin: 3f);
             vm.upa = system;
@@ -167,15 +166,15 @@ namespace NINA.Plugins.PolarAlignment.Test {
             vm.XBacklashCompensation = 3f;
 
             await vm.TryNudgeX(15, CancellationToken.None);
-            system.PhysicalX.Should().BeApproximately(15.0, 0.01, "no reversal yet: the axis starts engaged positive");
+            system.PhysicalX.Should().BeApproximately(15.0, 0.01, "the axis starts engaged positive: a positive move pays no play");
 
             await vm.TryNudgeX(-15, CancellationToken.None);
             system.PhysicalX.Should().BeApproximately(0.0, 0.01,
-                "positive-to-negative: the raw move travels 12', the single clearing move recovers the 3' the reversal lost");
+                "positive-to-negative: the raw move travels 12', the overtravel leg recovers the lost 3' and the return re-engages the positive preload");
 
             await vm.TryNudgeX(15, CancellationToken.None);
             system.PhysicalX.Should().BeApproximately(15.0, 0.01,
-                "negative-to-positive: the play is paid and recovered again on the way back");
+                "from the restored positive preload the positive move pays no play again");
         }
 
         [Test]
