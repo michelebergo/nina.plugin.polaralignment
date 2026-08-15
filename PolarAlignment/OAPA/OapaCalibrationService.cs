@@ -320,115 +320,24 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
                 var r2 = await MoveAndMeasure(legLogical, -1f).ConfigureAwait(false);
                 var reverseResponse = (Math.Abs(r1) + Math.Abs(r2)) / 2.0 / legLogical;
 
-                // The backlash transitions are evaluated against the response of the
-                // direction the axis was travelling toward, so a direction asymmetry does
-                // not masquerade as backlash (or as slippage).
-                //
-                // The raw (unclamped) value is kept: a *negative* transition means the
-                // reversal leg travelled further than the response predicts, which no amount
-                // of real play can produce. Clamping it to zero turns that impossibility into
-                // a plausible-looking "no play this way", and paired against a significant
-                // value in the other direction that zero becomes tens of arcminutes of
-                // compensation made of nothing.
-                var rawForward = backlashLeg * reverseResponse - reversalTravel;
-                var backlashForward = Math.Max(0, rawForward);
-
-                // S5: opposite transition. This is a *second quantity*, not a second sample
-                // of the first: the two are equal only on a mechanism whose play costs the
-                // same to cross both ways, which an axis carrying its load against gravity
-                // is not. Their disagreement is therefore a directionality verdict.
+                // S5: opposite transition, the second backlash quantity.
                 reportStatus?.Invoke($"{axisLabel}: measuring the opposite transition...");
                 var dBack = await MoveAndMeasure(backlashLeg, +1f).ConfigureAwait(false);
-                var rawReverse = backlashLeg * forwardResponse - Math.Abs(dBack);
-                var backlashReverse = Math.Max(0, rawReverse);
 
-                var maxResponse = Math.Max(forwardResponse, reverseResponse);
-                var responseAgreement = maxResponse > 0 ? Math.Min(forwardResponse, reverseResponse) / maxResponse : 0.0;
-                var asymmetric = 1.0 - responseAgreement > AsymmetryFlagThreshold;
-                // Beyond a factor of two the mean is not a compromise between the two
-                // directions, it is wrong for both - and each backlash transition is
-                // evaluated against the *other* direction's response, so the pair goes with
-                // it. Field evidence: fwd=0.860 against rev=0.102 produced a factor three
-                // times what the axis delivered during the corrections that followed.
-                var responseSuspect = responseAgreement < ResponseAgreementFloor;
-
-                double backlash;
-                var directional = false;
-                var backlashSuspect = responseSuspect;
-                var significant = Math.Max(backlashForward, backlashReverse);
-                if (significant < 2 * threshold) {
-                    backlash = 0; // both transitions indistinguishable from noise
-                } else if (backlashSuspect || Math.Min(rawForward, rawReverse) < -threshold) {
-                    // An impossible transition invalidates the pair, not just itself: both
-                    // are computed from the same two responses over the same escalated leg.
-                    backlashSuspect = true;
-                    backlash = 0;
-                } else {
-                    // A transition indistinguishable from zero paired against a significant
-                    // one cannot establish directionality. Zero-against-large is the field
-                    // signature of a slipped measurement, not of directional mechanics: the
-                    // same axis measured 4.10'/4.31' and, five minutes later, 0.00'/8.69' -
-                    // stable sum, flipped split - and the phantom pair threw a 23" residual
-                    // to 6'32" at the finish line. (0.00'/27.21' on the same rig is the other
-                    // occurrence; no genuine pair with a zero side has ever repeated.) The
-                    // mean is the safe collapse: a symmetric value's magnitude cancels out of
-                    // the two-leg plan, so even an imperfect mean only costs travel time.
-                    var bothTransitionsMeasurable = Math.Min(backlashForward, backlashReverse) >= threshold;
-                    directional = bothTransitionsMeasurable
-                        && Math.Abs(backlashForward - backlashReverse) > Math.Max(DirectionalRelativeThreshold * significant, 2 * threshold);
-                    backlash = (backlashForward + backlashReverse) / 2.0;
-                    if (!bothTransitionsMeasurable) {
-                        Logger.Info($"OAPA cal {axisLabel}: one backlash transition is indistinguishable from zero against " +
-                            $"{significant:F2}' on the other - the split is not established (slip signature); using the mean {backlash:F2}' for both directions");
-                    }
-                }
-
-                // backlashForward was measured entering the leg direction -dirSign (S3),
-                // backlashReverse entering +dirSign (S5). The Reverse flag therefore swaps
-                // which one belongs to which commanded sign; resolving it here means no
-                // consumer has to know about dirSign at all.
-                var enteringPositive = (float)(dirSign > 0 ? backlashReverse : backlashForward);
-                var enteringNegative = (float)(dirSign > 0 ? backlashForward : backlashReverse);
-                if (!directional) {
-                    // A "not directional" verdict is the statement that these two figures are
-                    // the same quantity measured twice. Reporting them separately anyway hands
-                    // the planner a difference made of measurement noise, and a two-leg
-                    // reversal travels `move - outward + back`: that gap becomes a fixed bias
-                    // on every reversal, so the axis can never be corrected by less than the
-                    // gap and requests below it move it the wrong way. Two field rigs stalled
-                    // at exactly their own gap - 9.3' and 7.3' - with `directional=false` in
-                    // the same log line. Collapsing to the mean restores the single-value
-                    // behaviour wherever the difference is not established, and changes
-                    // nothing where it is.
-                    enteringPositive = enteringNegative = (float)backlash;
-                }
-
-                var meanResponse = (forwardResponse + reverseResponse) / 2.0;
-
-                // A factor error is a scale: it affects both directions identically. Two
-                // responses that disagree by more than the agreement floor are therefore
-                // not two measurements of the scale - the weaker direction is losing
-                // motion mechanically (stall, slip, insufficient torque) and blending it
-                // in poisons the factor. Field case: responses 0.199/0.958 blended into a
-                // factor 1.7x too large, and recalibrating on top of that compounded it to
-                // 3.6x, while the strong direction alone was within a few percent of the
-                // truth. When the pair is suspect, the strong direction IS the scale.
-                var scaleResponse = responseSuspect ? Math.Max(forwardResponse, reverseResponse) : meanResponse;
-
-                var result = new AxisCalibrationResult {
-                    Ratio = (float)(currentRatio / scaleResponse),
-                    ForwardRatio = (float)(currentRatio / forwardResponse),
-                    ReverseRatio = (float)(currentRatio / reverseResponse),
-                    BacklashArcmin = (float)backlash,
-                    NoiseSigmaArcmin = (float)noise,
-                    Consistent = directionConsistent,
-                    Asymmetric = asymmetric,
-                    BacklashEnteringPositiveArcmin = enteringPositive,
-                    BacklashEnteringNegativeArcmin = enteringNegative,
-                    DirectionalBacklash = directional,
-                    BacklashSuspect = backlashSuspect,
-                    ResponseSuspect = responseSuspect
-                };
+                // Everything measured; what the measurements *mean* — the suspect flags,
+                // the directionality verdict, the scale choice — is the pure derivation.
+                var derivation = OapaCalibrationVerdicts.Derive(new AxisCalibrationMeasurements(
+                    CurrentRatio: currentRatio,
+                    DirSign: dirSign,
+                    NoiseSigmaArcmin: noise,
+                    DetectionThresholdArcmin: threshold,
+                    DirectionConsistent: directionConsistent,
+                    ForwardResponse: forwardResponse,
+                    ReverseResponse: reverseResponse,
+                    BacklashLegArcmin: backlashLeg,
+                    ReversalTravelArcmin: reversalTravel,
+                    OppositeTravelArcmin: Math.Abs(dBack)), axisLabel);
+                var result = derivation.Result;
 
                 // Both the raw pair and the pair that will actually be applied: they differ
                 // whenever the directionality verdict collapses them, and a log that only
@@ -436,9 +345,9 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
                 // The pointing and its projection make a future log self-diagnosing: a factor
                 // measured through a foreshortened projection is visible right where it was born.
                 Logger.Info($"OAPA cal {axisLabel}: noise={noise:F2}', responses fwd={forwardResponse:F3}/rev={reverseResponse:F3} '/unit, " +
-                    $"backlash={backlashForward:F2}'/{backlashReverse:F2}' -> applied +{enteringPositive:F2}'/-{enteringNegative:F2}', ratio={result.Ratio:F2}, " +
+                    $"backlash={derivation.BacklashForwardArcmin:F2}'/{derivation.BacklashReverseArcmin:F2}' -> applied +{result.BacklashEnteringPositiveArcmin:F2}'/-{result.BacklashEnteringNegativeArcmin:F2}', ratio={result.Ratio:F2}, " +
                     $"consistent={result.Consistent}, asymmetric={result.Asymmetric}, directional={result.DirectionalBacklash}, " +
-                    $"backlashSuspect={backlashSuspect}, responseSuspect={responseSuspect}, solves={solveCount}, " +
+                    $"backlashSuspect={result.BacklashSuspect}, responseSuspect={result.ResponseSuspect}, solves={solveCount}, " +
                     $"field alt={baseline.AltitudeDegrees:F1}/az={baseline.AzimuthDegrees:F1}, proj={(isAzimuth ? 1.0 : baselineCosAz):F3}");
 
                 // S6: physically return to the baseline. The response just measured makes
@@ -554,12 +463,6 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
         private const double BacklashLegFraction = 0.5;
         /// <summary>Maximum backlash-leg escalations before accepting the measure with a warning.</summary>
         private const int MaxBacklashEscalations = 3;
-        /// <summary>Forward/reverse response disagreement above which the axis is flagged asymmetric.</summary>
-        private const double AsymmetryFlagThreshold = 0.10;
-        /// <summary>Below this min/max response ratio (a factor of two) the pass measured nothing usable.</summary>
-        private const double ResponseAgreementFloor = 0.5;
-        /// <summary>Backlash-transition disagreement share above which the play is declared direction-dependent.</summary>
-        private const double DirectionalRelativeThreshold = 0.20;
         /// <summary>Hard solve budget per axis pass; exceeded means something is off and the sequence aborts honestly.</summary>
         private const int MaxSolvesPerAxis = 20;
         /// <summary>Physical cap for a single escalated leg, in axis arcminutes (sky excursion guard).</summary>
