@@ -1,5 +1,9 @@
 # Changelog
 
+## Version 2.2.7.0 (beta rc17.6)
+- **Internal restructuring only — no behavior change.** The calibration verdict derivation (the rules that turn a pass's measurements into the factor, the per-direction backlash pair, and the honesty flags) moved out of the calibration sequence into a pure, directly-tested class. Every rule is now pinned by a dedicated test carrying the field numbers that motivated it. This mirrors the structure of the upstream PR series, so what lands upstream is exactly what this beta runs.
+- Firmware unchanged (1.2.2). No re-calibration required. Nothing user-visible changes.
+
 ## Version 2.2.7.0 (beta rc17.5)
 - **The shared backlash clearing now matches the upstream plugin (2.2.6.7) exactly.** Upstream replaced the old zero-sum clearing pair with a one-sided scheme: the axis is kept under a positive mechanical preload — a negative move is followed by an overtravel-and-return pair, a positive move needs no compensation, and the position counter returns to the commanded value. rc17.4's interim single-move clearing delivered the same physical arrival but left the position counter offset by the compensation and diverged from upstream; the beta now carries the upstream planner and its tests verbatim. Affects the Avalon UPAS compensation path and absolute moves on all systems; OAPA relative nudges keep their backlash modes unchanged.
 - Firmware unchanged (1.2.2). No re-calibration required.
