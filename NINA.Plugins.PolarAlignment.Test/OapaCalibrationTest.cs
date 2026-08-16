@@ -186,12 +186,31 @@ namespace NINA.Plugins.PolarAlignment.Test {
                 return inner.CaptureAndSolve(token);
             }
 
+            public void BeginCalibration() {
+                Events.Add("begin");
+            }
+
             /// <summary>Stands in for Task.Delay so the tests never wait on real time.</summary>
             public Task Settle(TimeSpan requested, CancellationToken token) {
                 Events.Add("settle");
                 Settles.Add(requested);
                 return Task.CompletedTask;
             }
+        }
+
+        [Test]
+        public async Task Calibration_FreezesTheSolverEpoch_BeforeItsFirstSolve() {
+            // The epoch freeze (see OapaSamplerEpochTest) only works if the pass is marked
+            // before any solve: a BeginCalibration arriving after the first solve would
+            // freeze the epoch of a sample that was already transformed at another time.
+            var recorder = new OrderRecordingAxis(new FakeAxis(responseScale: 0.5, physicalBacklashArcmin: 5.0));
+            var service = new OapaCalibrationService(recorder, recorder);
+
+            await service.CalibrateAxisWithAutoReverse(
+                Axis.YAxis, currentRatio: 100f, reversed: false, "Y", null, CancellationToken.None);
+
+            recorder.Events.First().Should().Be("begin", "the pass must freeze the solver's epoch before its first solve");
+            recorder.Events.Count(e => e == "begin").Should().Be(1, "one pass, one epoch");
         }
 
         [Test]
@@ -229,7 +248,7 @@ namespace NINA.Plugins.PolarAlignment.Test {
             await service.CalibrateAxisWithAutoReverse(
                 Axis.YAxis, currentRatio: 100f, reversed: false, "Y", null, CancellationToken.None);
 
-            recorder.Events.First().Should().Be("solve", "the noise measurement comes before any motion");
+            recorder.Events.First(e => e != "begin").Should().Be("solve", "the noise measurement comes before any motion");
         }
 
         [Test]
