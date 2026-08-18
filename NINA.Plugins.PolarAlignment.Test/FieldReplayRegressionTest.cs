@@ -184,6 +184,12 @@ namespace NINA.Plugins.PolarAlignment.Test {
             public OapaBacklashMode Mode;
             public float BacklashPos;
             public float BacklashNeg;
+            /// <summary>
+            /// What the VM supplies in production: the calibration's own detection threshold,
+            /// below which a reversal cannot be honoured. Zero unless a scenario sets it, so
+            /// the scenarios written before it existed keep exercising what they were written for.
+            /// </summary>
+            public float MinimumReversalArcmin;
         }
 
         private static async Task<AppliedAxis> CalibrateAndApply(FieldRig rig, RigAxis axis, float currentRatio = 100f,
@@ -318,13 +324,13 @@ namespace NINA.Plugins.PolarAlignment.Test {
                 }
 
                 if (Math.Abs(plan.XMagnitude) > 0) {
-                    foreach (var leg in BacklashModePlanner.PlanMoves(x.Mode, (float)plan.XMagnitude, x.BacklashPos, x.BacklashNeg, lastX)) {
+                    foreach (var leg in BacklashModePlanner.PlanMoves(x.Mode, (float)plan.XMagnitude, x.BacklashPos, x.BacklashNeg, lastX, x.MinimumReversalArcmin)) {
                         rig.MoveX(leg);
                         if (Math.Abs(leg) > 0) { lastX = leg >= 0 ? LastDirection.Positive : LastDirection.Negative; }
                     }
                 }
                 if (Math.Abs(plan.YMagnitude) > 0) {
-                    foreach (var leg in BacklashModePlanner.PlanMoves(y.Mode, (float)plan.YMagnitude, y.BacklashPos, y.BacklashNeg, lastY)) {
+                    foreach (var leg in BacklashModePlanner.PlanMoves(y.Mode, (float)plan.YMagnitude, y.BacklashPos, y.BacklashNeg, lastY, y.MinimumReversalArcmin)) {
                         rig.MoveY(leg);
                         if (Math.Abs(leg) > 0) { lastY = leg >= 0 ? LastDirection.Positive : LastDirection.Negative; }
                     }
@@ -522,6 +528,65 @@ namespace NINA.Plugins.PolarAlignment.Test {
 
             result.Outcome.Should().Be(ReplayOutcome.Converged,
                 $"{result.Reason} (true error {result.TrueFinalErrorArcmin:F2}' after {result.Cycles} cycles)");
+        }
+
+        [Test]
+        public async Task StrGazerReal_20260816_WithoutEstimatorDrift_TheFinePhaseSettles() {
+            // strgazer_20260816-222942: EQM-35 + OnStep, 2 deg 55' off, altitude carrying its
+            // load against gravity with the pair the calibration measured that night. With a
+            // stable estimate the loop walks it down and stops - which is the control case for
+            // the scenario below, and says the mechanism itself was never the obstacle.
+            var rig = StrGazer20260816();
+            var x = await CalibrateAndApply(rig, rig.X);
+            var y = await CalibrateAndApply(rig, rig.Y);
+            ApplyStrGazerAltitudePair(y, minimumReversalArcmin: 0f);
+
+            var result = RunAlignment(rig, x, y);
+
+            result.Outcome.Should().Be(ReplayOutcome.Converged, result.Reason);
+            result.TrueFinalErrorArcmin.Should().BeLessThan(0.6, $"true error after {result.Cycles} cycles");
+        }
+
+        [TestCase(0f, TestName = "EstimatorDrift_FalseSuccess_WithoutTheReversalFloor")]
+        [TestCase(0.35f, TestName = "EstimatorDrift_FalseSuccess_WithTheReversalFloorToo")]
+        public async Task StrGazerReal_20260816_EstimatorDrift_EndsInAFalseSuccess(float minimumReversalArcmin) {
+            // The same rig with the drift measured off that night's log: between two solves
+            // with nothing moving, the reading worsened by ~0.14' four times in a row - about
+            // 1.2' a minute at a 10s cycle, almost all of it in azimuth.
+            //
+            // Both parameter cases run identically on purpose. The reversal floor added in
+            // rc17.7 stops an axis being pushed past its target by its own compensation, and
+            // it does not rescue this: the drift is in the core's error model, on the other
+            // side of the boundary, and no axis-side policy can see it. What the simulator
+            // quantifies is the cost - the loop announces 0.11' and leaves the platform 2.4'
+            // out - which is the evidence an issue against that estimator needs.
+            var rig = StrGazer20260816();
+            var x = await CalibrateAndApply(rig, rig.X);
+            var y = await CalibrateAndApply(rig, rig.Y);
+            ApplyStrGazerAltitudePair(y, minimumReversalArcmin);
+
+            var result = RunAlignment(rig, x, y, new LoopConditions { EstimateDriftAzPerCycle = 0.2 });
+
+            result.Outcome.Should().Be(ReplayOutcome.FalseSuccess,
+                $"{result.Reason} (true error {result.TrueFinalErrorArcmin:F2}' after {result.Cycles} cycles)");
+            result.TrueFinalErrorArcmin.Should().BeGreaterThan(2.0,
+                "the announced figure and the truth part company by several times the tolerance");
+        }
+
+        private static FieldRig StrGazer20260816() {
+            var rig = new FieldRig { AzErrArcmin = 158.5, AltErrArcmin = 74, NoiseAmplitudeArcmin = 0.07 };
+            rig.X.ResponseFwd = 1.05; rig.X.ResponseRev = 0.99; rig.X.DeadbandArcmin = 0.6;
+            rig.Y.ResponseFwd = 0.99; rig.Y.ResponseRev = 1.06; rig.Y.DeadbandArcmin = 0.9;
+            rig.X.InitEngagement(); rig.Y.InitEngagement();
+            return rig;
+        }
+
+        /// <summary>The directional pair that night's calibration reported for the altitude axis.</summary>
+        private static void ApplyStrGazerAltitudePair(AppliedAxis y, float minimumReversalArcmin) {
+            y.Mode = OapaBacklashMode.Full;
+            y.BacklashPos = 2.19f;
+            y.BacklashNeg = 0.68f;
+            y.MinimumReversalArcmin = minimumReversalArcmin;
         }
 
         [Test]
