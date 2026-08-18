@@ -59,6 +59,33 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
         private const float LargeBacklashArcmin = 3f;
 
         /// <summary>
+        /// The smallest reversal this axis can be asked for and still arrive where it was
+        /// sent. A compensated plan lands exactly only in so far as the configured play
+        /// matches the mechanism's real play, and that agreement is only known to the
+        /// precision the calibration could measure it with - which is the same
+        /// <see cref="MeasurableFloorArcmin"/> below which a backlash is declared
+        /// unmeasurable in the first place. Ask for less than that across a reversal and the
+        /// compensation's own error is larger than the correction being attempted.
+        ///
+        /// Field case: a 0.19' correction on an axis compensating 0.68' was commanded as
+        /// 0.87', tripled the error, and did it four times in a row before the alignment gave
+        /// up and finished best-effort - at which point a fresh measurement found 17'34" where
+        /// the loop was claiming 0.38'.
+        ///
+        /// Zero for <see cref="OapaBacklashMode.Off"/> and for any move continuing in the
+        /// engaged direction: those pay no play, so they are exact at any size, which is why
+        /// an axis with no measurable backlash keeps converging as finely as the solver allows.
+        /// </summary>
+        /// <remarks>
+        /// Supplied by the caller rather than assumed here, because the planner does not know
+        /// how well the numbers it is given were measured. The field replay suite settles the
+        /// question: under a mechanism that loses exactly the configured play, small reversals
+        /// land exactly and are *needed* to converge - blocking them on principle stops healthy
+        /// rigs short of tolerance. So the floor belongs to whoever knows the calibration's own
+        /// precision, and is zero by default.
+        /// </remarks>
+
+        /// <summary>
         /// Plans the command sequence for a requested relative move on an axis whose play
         /// costs the same in both directions.
         /// </summary>
@@ -71,14 +98,33 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
         /// </summary>
         /// <param name="backlashEnteringPositive">Motion lost when a move in the positive direction reverses into it.</param>
         /// <param name="backlashEnteringNegative">Motion lost when a move in the negative direction reverses into it.</param>
+        /// <param name="minimumReversalArcmin">
+        /// Smallest reversal this axis can be asked for and still arrive where it was sent;
+        /// requests below it return an empty plan. Zero disables the check.
+        /// </param>
         public static float[] PlanMoves(OapaBacklashMode mode, float move,
-            float backlashEnteringPositive, float backlashEnteringNegative, LastDirection lastDirection) {
+            float backlashEnteringPositive, float backlashEnteringNegative, LastDirection lastDirection,
+            float minimumReversalArcmin = 0f) {
 
             var sign = Math.Sign(move);
             var lastSign = lastDirection == LastDirection.Positive ? 1 : -1;
 
             if (sign == 0 || mode == OapaBacklashMode.Off) {
                 return new[] { move };
+            }
+
+            // A reversal finer than the compensation is known to cannot be honoured:
+            // compensating overshoots it, not compensating loses it to the play. An empty plan
+            // says so - moving the axis badly is worse than leaving it where it is, because
+            // the caller reads the same error again and asks again, which is how a correction
+            // loop ends up oscillating instead of converging. Only reversals are subject to
+            // this: a move continuing in the engaged direction pays no play at any size.
+            var hasPlay = Math.Max(backlashEnteringPositive, backlashEnteringNegative) > 0f;
+            var reverses = mode == OapaBacklashMode.Unidirectional
+                ? sign < 0 || lastSign < 0
+                : sign != lastSign;
+            if (hasPlay && reverses && minimumReversalArcmin > 0f && Math.Abs(move) < minimumReversalArcmin) {
+                return Array.Empty<float>();
             }
 
             if (mode == OapaBacklashMode.Unidirectional) {

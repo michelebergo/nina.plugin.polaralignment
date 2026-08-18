@@ -140,13 +140,78 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
             }
         }
 
+        /// <summary>
+        /// What the correction loop waits after each move. This is the value the shared loop
+        /// reads through the selected system, so it is the effective one - the number the user
+        /// typed lives in <see cref="SettleTimeSetting"/> and is what the panel edits, which
+        /// is why the two are separate properties: a box that displayed the effective value
+        /// would make the user's own choice unreachable the moment the unlock took effect.
+        /// </summary>
         public override double AutomatedAdjustmentSettleTime {
+            get => EffectiveSettleTime;
+            set => SettleTimeSetting = value;
+        }
+
+        /// <summary>The settle the user chose: used as-is unless a verified calibration unlocks the faster one.</summary>
+        public double SettleTimeSetting {
             get => Properties.Settings.Default.AutomatedAdjustmentSettleTime;
             set {
                 Properties.Settings.Default.AutomatedAdjustmentSettleTime = value;
                 CoreUtil.SaveSettings(Properties.Settings.Default);
                 RaisePropertyChanged();
+                RaisePropertyChanged(nameof(AutomatedAdjustmentSettleTime));
+                RaisePropertyChanged(nameof(EffectiveSettleTime));
             }
+        }
+
+        /// <summary>
+        /// Whether a verified calibration is allowed to speed up the corrections. Off by
+        /// default: an existing installation must keep behaving exactly as it did, and the
+        /// values this unlocks trade a larger single excursion for fewer cycles.
+        /// </summary>
+        public bool AdaptiveSpeedUp {
+            get => Properties.Settings.Default.OAPAAdaptiveSpeedUp;
+            set {
+                Properties.Settings.Default.OAPAAdaptiveSpeedUp = value;
+                CoreUtil.SaveSettings(Properties.Settings.Default);
+                RaisePropertyChanged();
+                RaiseSpeedUpChanged();
+            }
+        }
+
+        /// <summary>
+        /// Whether the last applied calibration came back verified on both axes. Persisted
+        /// because the corrections it authorises may happen in a later session, and
+        /// invalidated whenever a factor or backlash value is edited by hand: a number the
+        /// user typed has not been verified by anything, so it cannot carry the verdict of a
+        /// measurement it replaced. (Same rule as the home position, which is invalidated by
+        /// the same edits for the same reason.)
+        /// </summary>
+        public bool CalibrationTrusted => Properties.Settings.Default.OAPACalibrationTrusted;
+
+        /// <summary>Why the last calibration is not trusted; empty when it is.</summary>
+        public string CalibrationTrustNote => Properties.Settings.Default.OAPACalibrationTrustNote;
+
+        private void SetCalibrationTrust(bool trusted, string note) {
+            if (Properties.Settings.Default.OAPACalibrationTrusted == trusted
+                && Properties.Settings.Default.OAPACalibrationTrustNote == note) {
+                return;
+            }
+            Properties.Settings.Default.OAPACalibrationTrusted = trusted;
+            Properties.Settings.Default.OAPACalibrationTrustNote = note;
+            CoreUtil.SaveSettings(Properties.Settings.Default);
+            Logger.Info($"OAPA calibration trust: {(trusted ? "verified" : $"not verified ({note})")}");
+            RaiseSpeedUpChanged();
+        }
+
+        private void RaiseSpeedUpChanged() {
+            RaisePropertyChanged(nameof(CalibrationTrusted));
+            RaisePropertyChanged(nameof(CalibrationTrustNote));
+            RaisePropertyChanged(nameof(SpeedUpUnlocked));
+            RaisePropertyChanged(nameof(SpeedUpStatus));
+            RaisePropertyChanged(nameof(EffectiveMaxCorrectionMagnitude));
+            RaisePropertyChanged(nameof(EffectiveSettleTime));
+            RaisePropertyChanged(nameof(AutomatedAdjustmentSettleTime));
         }
 
         public override float XGearRatio {
@@ -155,6 +220,12 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
         }
 
         private void SetXGearRatio(float value, OapaParameterSource source) {
+            // A value typed by hand carries no verdict: the measurement that earned the
+            // trust has just been replaced, so whatever it authorised is withdrawn until the
+            // next calibration earns it again. Same rule the home position follows.
+            if (source == OapaParameterSource.Manual) {
+                SetCalibrationTrust(false, "a factor or backlash value was edited by hand after the last calibration");
+            }
             value = System.Math.Clamp(value, MinimumFactor, MaximumFactor);
             Properties.Settings.Default.OAPAXGearRatio = value;
             Properties.Settings.Default.OAPAXGearRatioSource = source.ToString();
@@ -199,6 +270,12 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
         }
 
         private void SetYGearRatio(float value, OapaParameterSource source) {
+            // A value typed by hand carries no verdict: the measurement that earned the
+            // trust has just been replaced, so whatever it authorised is withdrawn until the
+            // next calibration earns it again. Same rule the home position follows.
+            if (source == OapaParameterSource.Manual) {
+                SetCalibrationTrust(false, "a factor or backlash value was edited by hand after the last calibration");
+            }
             value = System.Math.Clamp(value, MinimumFactor, MaximumFactor);
             Properties.Settings.Default.OAPAYGearRatio = value;
             Properties.Settings.Default.OAPAYGearRatioSource = source.ToString();
@@ -246,6 +323,12 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
         }
 
         private void SetXBacklash(float value, OapaParameterSource source) {
+            // A value typed by hand carries no verdict: the measurement that earned the
+            // trust has just been replaced, so whatever it authorised is withdrawn until the
+            // next calibration earns it again. Same rule the home position follows.
+            if (source == OapaParameterSource.Manual) {
+                SetCalibrationTrust(false, "a factor or backlash value was edited by hand after the last calibration");
+            }
             value = System.Math.Clamp(value, 0f, MaximumBacklashArcmin);
             Properties.Settings.Default.OAPAXBacklashCompensation = value;
             Properties.Settings.Default.OAPAXBacklashSource = source.ToString();
@@ -263,6 +346,12 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
         }
 
         private void SetYBacklash(float value, OapaParameterSource source) {
+            // A value typed by hand carries no verdict: the measurement that earned the
+            // trust has just been replaced, so whatever it authorised is withdrawn until the
+            // next calibration earns it again. Same rule the home position follows.
+            if (source == OapaParameterSource.Manual) {
+                SetCalibrationTrust(false, "a factor or backlash value was edited by hand after the last calibration");
+            }
             value = System.Math.Clamp(value, 0f, MaximumBacklashArcmin);
             Properties.Settings.Default.OAPAYBacklashCompensation = value;
             Properties.Settings.Default.OAPAYBacklashSource = source.ToString();
@@ -288,6 +377,12 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
         }
 
         private void SetXBacklashNegative(float value, OapaParameterSource source) {
+            // A value typed by hand carries no verdict: the measurement that earned the
+            // trust has just been replaced, so whatever it authorised is withdrawn until the
+            // next calibration earns it again. Same rule the home position follows.
+            if (source == OapaParameterSource.Manual) {
+                SetCalibrationTrust(false, "a factor or backlash value was edited by hand after the last calibration");
+            }
             value = System.Math.Clamp(value, 0f, MaximumBacklashArcmin);
             Properties.Settings.Default.OAPAXBacklashCompensationNegative = value;
             Properties.Settings.Default.OAPAXBacklashSource = source.ToString();
@@ -305,6 +400,12 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
         }
 
         private void SetYBacklashNegative(float value, OapaParameterSource source) {
+            // A value typed by hand carries no verdict: the measurement that earned the
+            // trust has just been replaced, so whatever it authorised is withdrawn until the
+            // next calibration earns it again. Same rule the home position follows.
+            if (source == OapaParameterSource.Manual) {
+                SetCalibrationTrust(false, "a factor or backlash value was edited by hand after the last calibration");
+            }
             value = System.Math.Clamp(value, 0f, MaximumBacklashArcmin);
             Properties.Settings.Default.OAPAYBacklashCompensationNegative = value;
             Properties.Settings.Default.OAPAYBacklashSource = source.ToString();
@@ -411,14 +512,29 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
             }
         }
 
-        // Route the shared clearing logic to the OAPA-specific altitude compensation.
+        /// <summary>
+        /// Route the shared clearing logic to the OAPA-specific per-axis compensation, and
+        /// honour the mode while doing it. The backlash modes are the OAPA compensation policy,
+        /// and Off has to mean off on every path that moves the axis.
+        ///
+        /// The relative nudges go through <see cref="BacklashModePlanner"/>, which handles Off.
+        /// The absolute moves go through the shared clearing, which only asks for a value - so
+        /// an axis set to Off still had its play compensated there: two extra moves of the full
+        /// backlash after every "move to". A tester measuring his own backlash by hand watched
+        /// the platform move three times per command and could conclude nothing, because the
+        /// only tool he had to measure with was perturbing what he was measuring.
+        /// </summary>
         protected override float GetBacklashCompensation(Axis axis) {
+            if (BacklashModeOf(axis) == OapaBacklashMode.Off) { return 0f; }
             return axis == Axis.YAxis ? YBacklashCompensation : base.GetBacklashCompensation(axis);
         }
 
         private float GetBacklashCompensationNegative(Axis axis) {
+            if (BacklashModeOf(axis) == OapaBacklashMode.Off) { return 0f; }
             return axis == Axis.YAxis ? YBacklashCompensationNegative : XBacklashCompensationNegative;
         }
+
+        private OapaBacklashMode BacklashModeOf(Axis axis) => axis == Axis.XAxis ? XBacklashMode : YBacklashMode;
 
         // OAPA hardware tolerates the faster profile: error-scaled probes and the 75%
         // correction candidate. UPAS and other systems keep the legacy behavior.
@@ -471,7 +587,18 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
         protected override async Task ExecuteRelativeMove(Axis axis, int speed, float position, CancellationToken token) {
             var mode = axis == Axis.XAxis ? XBacklashMode : YBacklashMode;
             var plan = BacklashModePlanner.PlanMoves(mode, position,
-                GetBacklashCompensation(axis), GetBacklashCompensationNegative(axis), LastDirectionOf(axis));
+                GetBacklashCompensation(axis), GetBacklashCompensationNegative(axis), LastDirectionOf(axis),
+                MinimumHonourableReversal(axis));
+            if (plan.Length == 0) {
+                // The request is finer than this axis can be positioned: its own backlash
+                // compensation would inject a larger error than the move is trying to remove.
+                // Reported rather than silently skipped - the correction loop will read the
+                // same error again, and the log has to explain why nothing moved.
+                Logger.Info($"OAPA backlash mode {mode} on {axis}: {position:F2}' not commanded - a reversal below " +
+                    $"{MinimumHonourableReversal(axis):F2}' is finer than this axis's compensation was measured to; " +
+                    "moving would add more error than it removes");
+                return;
+            }
             if (plan.Length > 1 || System.Math.Abs(plan[0] - position) > float.Epsilon) {
                 // The net is what the axis travels if it loses no play at all, so it is the
                 // floor of what a two-leg plan can achieve. When it drifts away from the
@@ -494,8 +621,47 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
         /// </summary>
         public override double GetMaximumCorrectionMagnitude(double currentTotalErrorArcmin) {
             var autoScaled = System.Math.Max(AutomatedAdjustmentController.DefaultMaximumMoveMagnitude, currentTotalErrorArcmin * 0.8);
-            return System.Math.Min(autoScaled, MaxCorrectionMagnitude);
+            return System.Math.Min(autoScaled, EffectiveMaxCorrectionMagnitude);
         }
+
+        /// <summary>
+        /// Correction ceiling actually in force. The user's value is the conservative case -
+        /// the one used when the mechanism has proven nothing - and a calibration that came
+        /// back verified on both axes unlocks the controller's configurable maximum. The
+        /// unlock is opt-in: with <see cref="AdaptiveSpeedUp"/> off this is the user's value
+        /// and the behaviour is what it has always been.
+        ///
+        /// The saving is in solves, not in motor time: the same angle gets travelled either
+        /// way, but a correction cycle costs about 8 seconds of capture, download and solve
+        /// around half a second of movement. From 5°51' the coarse phase takes a dozen cycles
+        /// at 30' and six at 60'.
+        /// </summary>
+        public double EffectiveMaxCorrectionMagnitude =>
+            SpeedUpUnlocked ? AutomatedAdjustmentController.MaximumConfigurableMoveMagnitude : MaxCorrectionMagnitude;
+
+        /// <summary>Settle actually waited after each automated correction, in seconds.</summary>
+        public double EffectiveSettleTime =>
+            SpeedUpUnlocked ? System.Math.Min(SettleTimeSetting, TrustedSettleSeconds) : SettleTimeSetting;
+
+        /// <summary>
+        /// Whether the last applied calibration earned the faster values and the user has
+        /// allowed them to be used. Both halves are required: a verdict alone must not
+        /// override a limit somebody chose deliberately.
+        /// </summary>
+        public bool SpeedUpUnlocked => AdaptiveSpeedUp && CalibrationTrusted;
+
+        /// <summary>
+        /// Why the faster values are or are not in use. Without this the panel would show two
+        /// numbers that quietly disagree with the two fields above them, and a user with a rig
+        /// that never gets the unlock would have no way to find out what to fix.
+        /// </summary>
+        public string SpeedUpStatus =>
+            !AdaptiveSpeedUp ? "using your values: the faster ones are switched off"
+            : CalibrationTrusted ? "using the faster values: the last calibration was verified on both axes"
+            : $"using your values: {CalibrationTrustNote}";
+
+        /// <summary>Settle a verified mechanism is allowed to drop to, in seconds.</summary>
+        private const double TrustedSettleSeconds = 0.5;
 
         public int XRunCurrent {
             get => Properties.Settings.Default.OAPAXRunCurrent;
@@ -652,6 +818,12 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
         [ObservableProperty]
         private float discoveredYNoise;
 
+        // Why this pass would not earn the faster correction values, empty when it would.
+        // Held from measurement until Apply, because trust travels with the numbers: a result
+        // that is measured and discarded must not leave a verdict behind.
+        [ObservableProperty]
+        private string discoveredTrustNote = string.Empty;
+
         [ObservableProperty]
         private string calibrationConsistencyMessage = string.Empty;
 
@@ -786,6 +958,7 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
                         DiscoveredXNoise = x.NoiseSigmaArcmin;
                         DiscoveredYNoise = y.NoiseSigmaArcmin;
                         CalibrationDirectionalBacklash = directional;
+                        DiscoveredTrustNote = DescribeCalibrationTrust(x, y);
                         CalibrationConsistencyMessage = consistencyMsg;
                         CalibrationStatus = $"Done. X={x.Ratio:F2}, Y={y.Ratio:F2}, backlash X={Pair(x)}, Y={Pair(y)}" +
                             (x.RestoredToBaseline && y.RestoredToBaseline ? string.Empty : " ⚠ not returned to start");
@@ -858,16 +1031,36 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
                 }
                 ApplyConfirmationPending = false;
 
+                // A direction split is only applied once a second calibration agrees with the
+                // first about which way costs more. One pass cannot tell a real asymmetry from
+                // a slipped measurement, and the two are not equally cheap to get wrong: the
+                // difference between the pair lands as a fixed bias on every reversal, so the
+                // axis can no longer be corrected by less than that difference. Field evidence
+                // on one rig, two consecutive nights, same axis: 1.45'/1.96' and then
+                // 2.19'/0.68' - a stable sum with the larger side flipped, which is the
+                // signature of slippage rather than of mechanics.
+                var (xPositive, xNegative) = ConfirmedPair(Axis.XAxis, DiscoveredXBacklash, DiscoveredXBacklashNegative);
+                var (yPositive, yNegative) = ConfirmedPair(Axis.YAxis, DiscoveredYBacklash, DiscoveredYBacklashNegative);
+
+                // The solve noise the pass measured: it sets how finely this axis can be asked
+                // to reverse, so it outlives the session that measured it.
+                Properties.Settings.Default.OAPAXCalibrationNoise = DiscoveredXNoise;
+                Properties.Settings.Default.OAPAYCalibrationNoise = DiscoveredYNoise;
+
                 SetXGearRatio(DiscoveredXRatio, OapaParameterSource.Calibrated);
                 SetYGearRatio(DiscoveredYRatio, OapaParameterSource.Calibrated);
-                SetXBacklash(DiscoveredXBacklash, OapaParameterSource.Calibrated);
-                SetYBacklash(DiscoveredYBacklash, OapaParameterSource.Calibrated);
-                SetXBacklashNegative(DiscoveredXBacklashNegative, OapaParameterSource.Calibrated);
-                SetYBacklashNegative(DiscoveredYBacklashNegative, OapaParameterSource.Calibrated);
+                SetXBacklash(xPositive, OapaParameterSource.Calibrated);
+                SetYBacklash(yPositive, OapaParameterSource.Calibrated);
+                SetXBacklashNegative(xNegative, OapaParameterSource.Calibrated);
+                SetYBacklashNegative(yNegative, OapaParameterSource.Calibrated);
                 // Applying the calibration includes picking the backlash strategy the
                 // measurements call for; the change is stated explicitly, never silent.
                 XBacklashMode = BacklashModePlanner.Recommend(DiscoveredXBacklash, DiscoveredXBacklashNegative, DiscoveredXNoise);
                 YBacklashMode = BacklashModePlanner.Recommend(DiscoveredYBacklash, DiscoveredYBacklashNegative, DiscoveredYNoise);
+                // Written after the factors, and deliberately last: the setters above have just
+                // withdrawn the trust as a manual-edit precaution, and this pass is the one thing
+                // entitled to grant it. Applying a calibration is the only way it is ever granted.
+                SetCalibrationTrust(string.IsNullOrEmpty(DiscoveredTrustNote), DiscoveredTrustNote);
                 HasCalibrationResult = false;
                 CalibrationStatus = $"Applied. Backlash mode set to X: {XBacklashMode}, Y: {YBacklashMode} (from the measured X {Pair(DiscoveredXBacklash, DiscoveredXBacklashNegative)}, Y {Pair(DiscoveredYBacklash, DiscoveredYBacklashNegative)})";
                 Logger.Info($"OAPA calibration applied: X={DiscoveredXRatio:F2}, Y={DiscoveredYRatio:F2}, backlash X={Pair(DiscoveredXBacklash, DiscoveredXBacklashNegative)}, Y={Pair(DiscoveredYBacklash, DiscoveredYBacklashNegative)}, modes X={XBacklashMode}, Y={YBacklashMode}");
@@ -876,6 +1069,95 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
                 Logger.Error(ex);
                 Notification.ShowError($"Failed to apply calibration: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// Whether this calibration earned the faster correction values, and if not, the one
+        /// thing to fix. Everything the pass already reports is used, in the order that makes
+        /// the message actionable: a direction that could not be established comes before a
+        /// suspect response, which comes before a factor measured on too little signal.
+        ///
+        /// Held per calibration rather than per axis: both axes are corrected by the same loop,
+        /// so a doubt about either one is a doubt about the run.
+        /// </summary>
+        /// <summary>
+        /// Smallest reversal this axis is asked to make. A compensated reversal lands where it
+        /// was sent only in so far as the configured play matches the real play, and that is
+        /// only known to the precision the calibration measured it with: the same detection
+        /// threshold the sequence used to decide what counted as motion at all. Asking for
+        /// less means the compensation's own error exceeds the correction being attempted.
+        ///
+        /// Zero until a calibration has run, and zero for an axis with no compensation - those
+        /// pay no play, so they stay as fine as the solver allows. This is deliberately not a
+        /// constant in the planner: the field replay suite shows that under a mechanism losing
+        /// exactly its configured play, small reversals land exactly and are needed to
+        /// converge. What makes them unsafe is not their size but how well the play was
+        /// measured, and only this side knows that.
+        /// </summary>
+        private float MinimumHonourableReversal(Axis axis) {
+            if (BacklashModeOf(axis) == OapaBacklashMode.Off) { return 0f; }
+            var noise = axis == Axis.XAxis
+                ? Properties.Settings.Default.OAPAXCalibrationNoise
+                : Properties.Settings.Default.OAPAYCalibrationNoise;
+            return noise > 0f
+                ? (float)System.Math.Max(OapaCalibrationService.NoiseSigmaFactor * noise, OapaCalibrationService.DetectionFloorArcmin)
+                : 0f;
+        }
+
+        /// <summary>
+        /// Returns the backlash pair to apply: the measured split when a previous calibrated
+        /// pair agrees about which direction costs more, the mean of the two otherwise.
+        ///
+        /// Collapsing is the cheap mistake. A symmetric value's magnitude cancels out of a
+        /// two-leg plan, so an imperfect mean costs travel time and nothing else; an
+        /// unestablished split costs the axis its ability to be corrected finely, permanently,
+        /// until someone recalibrates. So the split has to be earned twice.
+        /// </summary>
+        private (float positive, float negative) ConfirmedPair(Axis axis, float measuredPositive, float measuredNegative) {
+            var mean = (measuredPositive + measuredNegative) / 2f;
+            var split = measuredPositive - measuredNegative;
+
+            // The comparison is against what the *previous pass measured*, not against what it
+            // applied: an unconfirmed split is applied as its mean, so comparing applied values
+            // would find a symmetric pair every time and no split could ever be confirmed.
+            var previousSplit = axis == Axis.XAxis
+                ? Properties.Settings.Default.OAPAXBacklashSplitLast
+                : Properties.Settings.Default.OAPAYBacklashSplitLast;
+            if (axis == Axis.XAxis) {
+                Properties.Settings.Default.OAPAXBacklashSplitLast = split;
+            } else {
+                Properties.Settings.Default.OAPAYBacklashSplitLast = split;
+            }
+
+            if (System.Math.Abs(split) <= float.Epsilon) { return (measuredPositive, measuredNegative); }
+
+            if (System.Math.Abs(previousSplit) <= float.Epsilon) {
+                Logger.Info($"OAPA {axis}: measured a direction split ({measuredPositive:F2}'/{measuredNegative:F2}') with nothing to confirm it against; " +
+                    $"applying the mean {mean:F2}' to both directions until a second calibration agrees");
+                return (mean, mean);
+            }
+
+            if (System.Math.Sign(previousSplit) != System.Math.Sign(split)) {
+                Logger.Warning($"OAPA {axis}: the direction split flipped between calibrations " +
+                    $"(previous difference {previousSplit:+0.00;-0.00}', now {split:+0.00;-0.00}') - " +
+                    $"a flipped split is slippage, not mechanics; applying the mean {mean:F2}' to both directions");
+                return (mean, mean);
+            }
+
+            Logger.Info($"OAPA {axis}: direction split confirmed by two calibrations " +
+                $"(difference {previousSplit:+0.00;-0.00}' then {split:+0.00;-0.00}'); applying {measuredPositive:F2}'/{measuredNegative:F2}' per direction");
+            return (measuredPositive, measuredNegative);
+        }
+
+        private static string DescribeCalibrationTrust(AxisCalibrationOutcome x, AxisCalibrationOutcome y) {
+            foreach (var (axis, o) in new[] { ("azimuth", x), ("altitude", y) }) {
+                if (!o.Consistent) { return $"the {axis} direction could not be established"; }
+                if (o.ResponseSuspect) { return $"the two {axis} directions disagreed by more than a factor of two"; }
+                if (o.BacklashSuspect) { return $"the {axis} backlash pair could not be trusted"; }
+                if (o.FactorProvisional) { return $"the {axis} factor was measured on a fraction of the intended signal - calibrate again now that it is applied"; }
+                if (!o.RestoredToBaseline) { return $"the {axis} axis did not verifiably return to its starting position"; }
+            }
+            return string.Empty;
         }
 
         [RelayCommand(CanExecute = nameof(HasCalibrationResult))]

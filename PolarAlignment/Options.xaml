@@ -44,6 +44,7 @@
     <s:String x:Key="ReverseAltitudeToolTip">Negates altitude-axis nudge and move commands sent through the selected hardware system.</s:String>
     <s:String x:Key="AzimuthBacklashCompensationToolTip">If non-zero and the azimuth movement direction changes, TPPA sends an extra negative-then-positive relative X move of this size after the main move.</s:String>
     <s:String x:Key="MaxCorrectionMagnitudeToolTip">Safety ceiling for the per-cycle correction size of the automated OAPA adjustments. The effective limit auto-scales with the measured error (80% of the current total error, minimum 5); this value only caps it. Range 1-60 arcmin, default 30; values above 30 are an opt-in for multi-degree initial errors — fewer coarse cycles, but a larger worst-case excursion before the runaway detection stops the moves.</s:String>
+    <s:String x:Key="AdaptiveSpeedUpToolTip">When the last applied Self-Calibration came back verified on both axes - direction established, no suspect response or backlash, the factor measured on full signal, and the platform returned to its starting position - the automated corrections use a larger step (the configurable maximum of 60 arcmin instead of your ceiling) and a shorter wait (0.5s instead of your settle time). The saving is in plate solves rather than motor time: from a 6-degree error the coarse phase takes about half as many cycles. The values you set above stay in force whenever the calibration is not verified, and with this off nothing changes at all. Editing a factor or backlash value by hand withdraws the verification until the next calibration.</s:String>
     <s:String x:Key="AutomatedAdjustmentsToolTip">When enabled, TPPA calls its automated correction routine and sends nudge commands through the selected hardware system during the correction phase.</s:String>
     <s:String x:Key="AutomatedAdjustmentSettleTimeToolTip">Number of seconds TPPA waits after each automated adjustment before continuing.</s:String>
     <s:String x:Key="ResetSettingsToolTip">Shows a confirmation dialog and then resets the TPPA plugin settings to their default values.</s:String>
@@ -502,6 +503,10 @@
                             Grid.Row="23"
                             Grid.Column="1"
                             Visibility="{Binding IsSystemSelected, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <!--  UPAS edits the setting directly. OAPA splits the two: the box holds
+                                  the user's value while the loop reads the effective one, so a box
+                                  showing the effective value would put the user's own choice out of
+                                  reach the moment a verified calibration unlocked the faster one.  -->
                             <ninactrl:UnitTextBox
                                 MinWidth="80"
                                 Margin="5,5,0,0"
@@ -510,7 +515,26 @@
                                 Text="{Binding ActiveSystem.AutomatedAdjustmentSettleTime}"
                                 ToolTip="{StaticResource AutomatedAdjustmentSettleTimeToolTip}"
                                 Unit="s"
-                                Visibility="{Binding ActiveSystem.DoAutomatedAdjustments, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                Visibility="{Binding IsUPASSelected, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                            <StackPanel
+                                Orientation="Horizontal"
+                                Visibility="{Binding IsOAPASelected, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                <ninactrl:UnitTextBox
+                                    MinWidth="80"
+                                    Margin="5,5,0,0"
+                                    HorizontalAlignment="Left"
+                                    VerticalAlignment="Center"
+                                    Text="{Binding ActiveSystem.SettleTimeSetting}"
+                                    ToolTip="{StaticResource AutomatedAdjustmentSettleTimeToolTip}"
+                                    Unit="s"
+                                    Visibility="{Binding ActiveSystem.DoAutomatedAdjustments, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                <TextBlock
+                                    Margin="8,5,0,0"
+                                    VerticalAlignment="Center"
+                                    Opacity="0.6"
+                                    Text="{Binding ActiveSystem.EffectiveSettleTime, StringFormat={}→ {0:0.#} s in use}"
+                                    Visibility="{Binding ActiveSystem.SpeedUpUnlocked, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                            </StackPanel>
                         </Grid>
                         <Grid
                             Grid.Row="24"
@@ -534,15 +558,37 @@
                             Grid.Row="25"
                             Grid.Column="1"
                             Visibility="{Binding IsOAPASelected, Converter={StaticResource BooleanToVisibilityConverter}}">
-                            <ninactrl:UnitTextBox
-                                MinWidth="80"
-                                Margin="5,5,0,0"
-                                HorizontalAlignment="Left"
-                                VerticalAlignment="Center"
-                                Text="{Binding OAPAMaxCorrectionMagnitude, StringFormat={}{0:0.#}}"
-                                ToolTip="{StaticResource MaxCorrectionMagnitudeToolTip}"
-                                Unit="arcmin"
-                                Visibility="{Binding ActiveSystem.DoAutomatedAdjustments, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                            <StackPanel Visibility="{Binding ActiveSystem.DoAutomatedAdjustments, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                <StackPanel Orientation="Horizontal">
+                                    <ninactrl:UnitTextBox
+                                        MinWidth="80"
+                                        Margin="5,5,0,0"
+                                        HorizontalAlignment="Left"
+                                        VerticalAlignment="Center"
+                                        Text="{Binding OAPAMaxCorrectionMagnitude, StringFormat={}{0:0.#}}"
+                                        ToolTip="{StaticResource MaxCorrectionMagnitudeToolTip}"
+                                        Unit="arcmin" />
+                                    <TextBlock
+                                        Margin="8,5,0,0"
+                                        VerticalAlignment="Center"
+                                        Opacity="0.6"
+                                        Text="{Binding ActiveSystem.EffectiveMaxCorrectionMagnitude, StringFormat={}→ {0:0.#} arcmin in use}"
+                                        Visibility="{Binding ActiveSystem.SpeedUpUnlocked, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                </StackPanel>
+                                <!--  The unlock and the reason it is or is not in force. Without the
+                                      reason a rig that never earns it gives the user nothing to act on.  -->
+                                <CheckBox
+                                    Margin="5,8,0,0"
+                                    HorizontalAlignment="Left"
+                                    Content="Let a verified calibration speed up corrections"
+                                    IsChecked="{Binding ActiveSystem.AdaptiveSpeedUp}"
+                                    ToolTip="{StaticResource AdaptiveSpeedUpToolTip}" />
+                                <TextBlock
+                                    Margin="5,3,0,0"
+                                    Opacity="0.6"
+                                    Text="{Binding ActiveSystem.SpeedUpStatus}"
+                                    TextWrapping="Wrap" />
+                            </StackPanel>
                         </Grid>
                         <TextBlock
                             Grid.Row="26"

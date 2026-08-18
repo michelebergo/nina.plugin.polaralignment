@@ -93,6 +93,85 @@ namespace NINA.Plugins.PolarAlignment.Test {
             system.RelativeMoves.Should().Equal((Axis.YAxis, -20.5f), (Axis.YAxis, 10.5f));
         }
 
+        /// <summary>
+        /// Drives the axis negative so the one-sided clearing has something to do, then runs an
+        /// absolute move and returns only what the clearing emitted.
+        /// </summary>
+        private static async Task<List<(Axis axis, float move)>> ClearingAfterAbsoluteMove(
+            UniversalPolarAlignmentOAPAVM vm, FakeSystem system) {
+
+            (await vm.TryNudgeY(-10f, CancellationToken.None)).Should().BeTrue();
+            system.RelativeMoves.Clear();
+            vm.TargetPositionY = -20f;
+            await vm.MoveY(CancellationToken.None);
+            return system.RelativeMoves;
+        }
+
+        [Test]
+        public async Task Off_AbsoluteMove_CompensatesNothing() {
+            // Field report (gilas, 17/08): with the mode on Off, every "move to" was still
+            // followed by two extra moves of the full backlash - 34.82' on that rig, several
+            // turns of the adjustment knob. The modes only governed the relative nudges; the
+            // absolute path asked for a compensation value and got the raw setting.
+            //
+            // It is not only an annoyance: it makes measuring one's own backlash by hand
+            // impossible, because the only tool available for the measurement perturbs the
+            // thing being measured.
+            var (vm, system) = Vm(OapaBacklashMode.Off);
+
+            var clearing = await ClearingAfterAbsoluteMove(vm, system);
+
+            clearing.Should().BeEmpty("Off has to mean off on every path that moves the axis");
+        }
+
+        [Test]
+        public async Task Full_AbsoluteMove_StillCompensates() {
+            // The other half of the same claim: silencing Off must not silence the modes that
+            // are supposed to compensate.
+            var (vm, system) = Vm(OapaBacklashMode.Full);
+
+            var clearing = await ClearingAfterAbsoluteMove(vm, system);
+
+            clearing.Should().NotBeEmpty("a configured mode still clears the play after an absolute move");
+        }
+
+        [Test]
+        public void AReversalFinerThanTheMeasurement_IsNotCommanded() {
+            // Field case (16/08): the correction loop asked the altitude axis for 0.19' with a
+            // 0.68' compensation configured. The plan came out at 0.87', the error tripled,
+            // and the same thing happened four times before the alignment gave up at 0.38' -
+            // where a fresh measurement then found 17'34". A reversal finer than the play was
+            // measured to cannot be honoured: compensating overshoots it, not compensating
+            // loses it to the play.
+            var plan = BacklashModePlanner.PlanMoves(OapaBacklashMode.Full, -0.19f, 2.19f, 0.68f,
+                LastDirection.Positive, minimumReversalArcmin: 0.25f);
+
+            plan.Should().BeEmpty();
+        }
+
+        [Test]
+        public void TheSameRequestInTheEngagedDirection_IsCommandedInFull() {
+            // Only reversals pay the play. An axis continuing the way it was already going
+            // arrives exactly at any size, which is why a clean axis keeps converging as
+            // finely as the solver can measure.
+            var plan = BacklashModePlanner.PlanMoves(OapaBacklashMode.Full, 0.19f, 2.19f, 0.68f,
+                LastDirection.Positive, minimumReversalArcmin: 0.25f);
+
+            plan.Should().Equal(0.19f);
+        }
+
+        [Test]
+        public void WithoutAMeasuredFloor_SmallReversalsAreStillPlanned() {
+            // The floor is supplied by whoever knows how well the play was measured, and is
+            // absent by default: the field replay suite shows that under a mechanism losing
+            // exactly its configured play, small reversals land exactly and are needed to
+            // converge. Their size is not what makes them unsafe.
+            var plan = BacklashModePlanner.PlanMoves(OapaBacklashMode.Full, -0.19f, 2.19f, 0.68f,
+                LastDirection.Positive);
+
+            plan.Should().Equal(-0.19f - 0.68f);
+        }
+
         [Test]
         public async Task SameDirection_AnyMode_PlainMove() {
             var (vm, system) = Vm(OapaBacklashMode.Unidirectional);
@@ -100,6 +179,60 @@ namespace NINA.Plugins.PolarAlignment.Test {
             system.RelativeMoves.Clear();
             (await vm.TryNudgeY(5f, CancellationToken.None)).Should().BeTrue();
             system.RelativeMoves.Should().Equal((Axis.YAxis, 5f));
+        }
+
+        /// <summary>Applies a calibration result with the given Y pair, single-step.</summary>
+        private static UniversalPolarAlignmentOAPAVM ApplyYPair(float positive, float negative,
+            UniversalPolarAlignmentOAPAVM existing = null) {
+
+            var vm = existing;
+            if (vm == null) {
+                vm = new UniversalPolarAlignmentOAPAVM(null, null, null, null, null);
+                vm.upa = new FakeSystem();
+                Properties.Settings.Default.OAPAXBacklashSource = "Default";
+                Properties.Settings.Default.OAPAYBacklashSource = "Default";
+                Properties.Settings.Default.OAPAXGearRatioSource = "Default";
+                Properties.Settings.Default.OAPAYGearRatioSource = "Default";
+            }
+            vm.DiscoveredXRatio = 100;
+            vm.DiscoveredYRatio = 100;
+            vm.DiscoveredXBacklash = 1f;
+            vm.DiscoveredXBacklashNegative = 1f;
+            vm.DiscoveredYBacklash = positive;
+            vm.DiscoveredYBacklashNegative = negative;
+            vm.DiscoveredXNoise = 0.05f;
+            vm.DiscoveredYNoise = 0.05f;
+            vm.HasCalibrationResult = true;
+            vm.ApplyCalibration();
+            return vm;
+        }
+
+        [Test]
+        public void AFirstDirectionSplit_IsAppliedAsItsMean_UntilASecondPassAgrees() {
+            // One pass cannot tell a real asymmetry from a slipped measurement, and the two
+            // are not equally cheap to get wrong: the difference between the pair lands as a
+            // fixed bias on every reversal, so the axis can no longer be corrected by less
+            // than that difference. Two rigs stalled at exactly their configured gap.
+            var vm = ApplyYPair(2.19f, 0.68f);
+
+            vm.YBacklashCompensation.Should().BeApproximately(1.435f, 0.01f);
+            vm.YBacklashCompensationNegative.Should().BeApproximately(1.435f, 0.01f);
+        }
+
+        [Test]
+        public void ASplitThatFlipsBetweenCalibrations_IsCollapsed_NotApplied() {
+            // Field evidence, one rig, two consecutive nights, same axis: 1.45'/1.96' and then
+            // 2.19'/0.68'. The sum barely moved, the larger side changed places. A stable sum
+            // with a flipped split is slippage, not mechanics.
+            var vm = ApplyYPair(1.45f, 1.96f);
+            ApplyYPair(1.50f, 2.10f, vm);          // agrees: the negative side is heavier both times
+            vm.YBacklashCompensation.Should().BeApproximately(1.50f, 0.01f, "two passes agreed on which side is heavier");
+            vm.YBacklashCompensationNegative.Should().BeApproximately(2.10f, 0.01f);
+
+            ApplyYPair(2.19f, 0.68f, vm);          // flips
+
+            vm.YBacklashCompensation.Should().BeApproximately(1.435f, 0.01f);
+            vm.YBacklashCompensationNegative.Should().BeApproximately(1.435f, 0.01f);
         }
 
         [Test]

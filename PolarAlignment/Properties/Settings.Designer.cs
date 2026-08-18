@@ -481,6 +481,90 @@ namespace NINA.Plugins.PolarAlignment.Properties {
 
         [global::System.Configuration.UserScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("False")]
+        public bool OAPAAdaptiveSpeedUp {
+            get {
+                return ((bool)(this["OAPAAdaptiveSpeedUp"]));
+            }
+            set {
+                this["OAPAAdaptiveSpeedUp"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("0")]
+        public float OAPAXCalibrationNoise {
+            get {
+                return ((float)(this["OAPAXCalibrationNoise"]));
+            }
+            set {
+                this["OAPAXCalibrationNoise"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("0")]
+        public float OAPAXBacklashSplitLast {
+            get {
+                return ((float)(this["OAPAXBacklashSplitLast"]));
+            }
+            set {
+                this["OAPAXBacklashSplitLast"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("0")]
+        public float OAPAYBacklashSplitLast {
+            get {
+                return ((float)(this["OAPAYBacklashSplitLast"]));
+            }
+            set {
+                this["OAPAYBacklashSplitLast"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("0")]
+        public float OAPAYCalibrationNoise {
+            get {
+                return ((float)(this["OAPAYCalibrationNoise"]));
+            }
+            set {
+                this["OAPAYCalibrationNoise"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("False")]
+        public bool OAPACalibrationTrusted {
+            get {
+                return ((bool)(this["OAPACalibrationTrusted"]));
+            }
+            set {
+                this["OAPACalibrationTrusted"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("the self-calibration has not been run yet")]
+        public string OAPACalibrationTrustNote {
+            get {
+                return ((string)(this["OAPACalibrationTrustNote"]));
+            }
+            set {
+                this["OAPACalibrationTrustNote"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
         [global::System.Configuration.DefaultSettingValueAttribute("Full")]
         public string OAPAXBacklashMode {
             get {

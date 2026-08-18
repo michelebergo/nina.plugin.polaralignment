@@ -200,6 +200,11 @@ namespace NINA.Plugins.PolarAlignment.Test {
             vm.DiscoveredYRatio = 200f;
             vm.DiscoveredXBacklash = 1f;
             vm.DiscoveredYBacklash = 2f;
+            // Both directions, as a real pass always produces: leaving the negative side at
+            // zero would read as a direction split, which Apply now collapses to the mean
+            // until a second calibration confirms it. These tests are about provenance.
+            vm.DiscoveredXBacklashNegative = 1f;
+            vm.DiscoveredYBacklashNegative = 2f;
             vm.DiscoveredXNoise = 0.05f;
             vm.DiscoveredYNoise = 0.05f;
             vm.HasCalibrationResult = true;

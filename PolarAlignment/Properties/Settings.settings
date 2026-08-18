@@ -116,6 +116,27 @@
     <Setting Name="OAPAMaxCorrectionMagnitude" Type="System.Double" Scope="User">
       <Value Profile="(Default)">30</Value>
     </Setting>
+    <Setting Name="OAPAAdaptiveSpeedUp" Type="System.Boolean" Scope="User">
+      <Value Profile="(Default)">False</Value>
+    </Setting>
+    <Setting Name="OAPAXCalibrationNoise" Type="System.Single" Scope="User">
+      <Value Profile="(Default)">0</Value>
+    </Setting>
+    <Setting Name="OAPAXBacklashSplitLast" Type="System.Single" Scope="User">
+      <Value Profile="(Default)">0</Value>
+    </Setting>
+    <Setting Name="OAPAYBacklashSplitLast" Type="System.Single" Scope="User">
+      <Value Profile="(Default)">0</Value>
+    </Setting>
+    <Setting Name="OAPAYCalibrationNoise" Type="System.Single" Scope="User">
+      <Value Profile="(Default)">0</Value>
+    </Setting>
+    <Setting Name="OAPACalibrationTrusted" Type="System.Boolean" Scope="User">
+      <Value Profile="(Default)">False</Value>
+    </Setting>
+    <Setting Name="OAPACalibrationTrustNote" Type="System.String" Scope="User">
+      <Value Profile="(Default)">the self-calibration has not been run yet</Value>
+    </Setting>
     <Setting Name="OAPAXBacklashMode" Type="System.String" Scope="User">
       <Value Profile="(Default)">Full</Value>
     </Setting>
