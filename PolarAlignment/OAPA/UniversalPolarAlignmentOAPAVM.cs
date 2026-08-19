@@ -63,6 +63,7 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
         }
 
         private void NotifyDerivedCommands() {
+            RaisePropertyChanged(nameof(CalibrateUnavailableReason));
             CalibrateGearRatiosCommand.NotifyCanExecuteChanged();
             SetHomeCommand.NotifyCanExecuteChanged();
             GoHomeCommand.NotifyCanExecuteChanged();
@@ -87,6 +88,11 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
             RaisePropertyChanged(nameof(AzimuthErrorDisplay));
             RaisePropertyChanged(nameof(AltitudeErrorDisplay));
             RaisePropertyChanged(nameof(TotalErrorDisplay));
+            RaisePropertyChanged(nameof(ToleranceRealityStatus));
+            // The camera's availability is not observable, so the reason line is refreshed on
+            // the alignment monitor's heartbeat too: that is exactly the window in which an
+            // alignment is running, or has just halted, and the user goes looking at the panel.
+            RaisePropertyChanged(nameof(CalibrateUnavailableReason));
         }
 
         /// <summary>Placeholder shown before the first measurement and after expiry.</summary>
@@ -585,10 +591,18 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
         /// (Unidirectional). Serves both the manual and the automated fine-approach path.
         /// </summary>
         protected override async Task ExecuteRelativeMove(Axis axis, int speed, float position, CancellationToken token) {
-            var mode = axis == Axis.XAxis ? XBacklashMode : YBacklashMode;
+            var suspended = CompensationSuspended(axis);
+            var mode = suspended ? OapaBacklashMode.Off : (axis == Axis.XAxis ? XBacklashMode : YBacklashMode);
+            if (suspended) {
+                Logger.Info($"OAPA play hysteresis on {axis}: {position:F2}' commanded as asked - " +
+                    $"the alignment is inside the {PlayHysteresisBandArcmin(axis):F2}' band, where the play " +
+                    "absorbs reversals whose direction comes from estimate jitter rather than from the error");
+            }
             var plan = BacklashModePlanner.PlanMoves(mode, position,
-                GetBacklashCompensation(axis), GetBacklashCompensationNegative(axis), LastDirectionOf(axis),
-                MinimumHonourableReversal(axis));
+                suspended ? 0f : GetBacklashCompensation(axis),
+                suspended ? 0f : GetBacklashCompensationNegative(axis),
+                LastDirectionOf(axis),
+                suspended ? 0f : MinimumHonourableReversal(axis));
             if (plan.Length == 0) {
                 // The request is finer than this axis can be positioned: its own backlash
                 // compensation would inject a larger error than the move is trying to remove.
@@ -608,6 +622,9 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
                 foreach (var m in plan) { net += m; }
                 Logger.Info($"OAPA backlash mode {mode} on {axis}: move {position:F2}' planned as [{string.Join(", ", plan)}] (net {net:F2}')");
             }
+            // The jitter measurement only counts differences taken with the platform still,
+            // so every commanded move has to disqualify the next one.
+            ErrorMonitor.NoteMovementCommanded();
             foreach (var move in plan) {
                 await upa.MoveRelative(axis, speed, move, token).ConfigureAwait(false);
             }
@@ -620,8 +637,203 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
         /// user setting as a pure safety ceiling.
         /// </summary>
         public override double GetMaximumCorrectionMagnitude(double currentTotalErrorArcmin) {
+            // The correction loop calls this once per cycle with the error it has just
+            // measured, which is the only place the axis layer can learn where the alignment
+            // currently stands. The play hysteresis needs exactly that number.
+            var now = Clock();
+            // The error this run *started* with, not the largest it has reached. A high-water
+            // mark grows when a run goes wrong, which would switch the rule on exactly when
+            // the alignment is already in trouble - a randomised sweep found rigs that start
+            // 5' out, deteriorate past the threshold, and then end 80' out. A gap longer than
+            // the expiry is what separates one run from the next.
+            if (!observedTotalErrorArcmin.HasValue || now - observedAt > ObservationExpiry) {
+                runStartedAtArcmin = currentTotalErrorArcmin;
+                LogPlayHysteresisState();
+            }
+            observedTotalErrorArcmin = currentTotalErrorArcmin;
+            observedAt = now;
             var autoScaled = System.Math.Max(AutomatedAdjustmentController.DefaultMaximumMoveMagnitude, currentTotalErrorArcmin * 0.8);
             return System.Math.Min(autoScaled, EffectiveMaxCorrectionMagnitude);
+        }
+
+        private double? observedTotalErrorArcmin;
+        private DateTime observedAt;
+        private double runStartedAtArcmin;
+
+        /// <summary>Injectable so the expiry can be tested without waiting on real time.</summary>
+        internal Func<DateTime> Clock { get; set; } = () => DateTime.UtcNow;
+
+        /// <summary>
+        /// Silence after which the last reported error says nothing about where the platform
+        /// is. The correction loop is the only thing that reports it, so without this the
+        /// value sits in the VM for as long as the panel stays open, and a manual nudge the
+        /// next evening would be governed by last night's alignment. Same 90 s the error
+        /// readout expires on, and for the same reason: well clear of the 50 s a single
+        /// compensated move occupied an axis in the field.
+        /// </summary>
+        private static readonly TimeSpan ObservationExpiry = TimeSpan.FromSeconds(90);
+
+        private double? LiveObservedErrorArcmin =>
+            observedTotalErrorArcmin.HasValue && Clock() - observedAt <= ObservationExpiry
+                ? observedTotalErrorArcmin
+                : null;
+
+        /// <summary>
+        /// Whether the mechanism's own play is left uncompensated once the alignment gets
+        /// close, so that it acts as a hysteresis band instead of being cancelled.
+        /// </summary>
+        public bool PlayHysteresis {
+            get => Properties.Settings.Default.OAPAPlayHysteresis;
+            set {
+                Properties.Settings.Default.OAPAPlayHysteresis = value;
+                CoreUtil.SaveSettings(Properties.Settings.Default);
+                RaisePropertyChanged();
+                RaisePropertyChanged(nameof(PlayHysteresisStatus));
+            }
+        }
+
+        /// <summary>Width of that band, in multiples of the axis's measured play.</summary>
+        public double PlayHysteresisMultiple {
+            get => Properties.Settings.Default.OAPAPlayHysteresisMultiple;
+            set {
+                Properties.Settings.Default.OAPAPlayHysteresisMultiple = System.Math.Max(0, value);
+                CoreUtil.SaveSettings(Properties.Settings.Default);
+                RaisePropertyChanged();
+                RaisePropertyChanged(nameof(PlayHysteresisStatus));
+            }
+        }
+
+        /// <summary>
+        /// Error below which this axis stops compensating its play, in arcminutes.
+        ///
+        /// The rule underneath is that compensating is a bet whose stake is the play itself:
+        /// worth making while the move being corrected is larger than the play, not worth it
+        /// once the move is smaller, because then a wrong play estimate costs more than the
+        /// correction is trying to remove. Since the commanded move tracks the error, the
+        /// error is the quantity to compare against.
+        ///
+        /// Both bounds come from a rig the replay suite broke, not from a value that scored
+        /// well. The band may never cover the coarse phase: an untethered multiple on an axis
+        /// carrying 56' of play disabled compensation for a whole run and left the platform
+        /// 266' out, so the correction ceiling bounds it. And it may never fall below one
+        /// play: an axis whose play exceeds the largest move the ceiling allows cannot be
+        /// compensated safely at any error, and clamping its band to the ceiling compensates
+        /// exactly where it is most dangerous - the same rig ends 3.55' out instead of 0.37'.
+        /// Between those two the multiple is free, and above 3x the replay outcome stops
+        /// changing at all.
+        /// </summary>
+        internal static double PlayHysteresisBand(double play, double multiple, double correctionCeiling,
+                                                  double runStartedAtArcmin) {
+            if (play <= 0 || multiple <= 0) { return 0; }
+            // Third bound, and the one a randomised sweep of 800 synthetic rigs had to find
+            // because the archive does not contain the case: when the play is comparable to
+            // the whole misalignment, the band covers the entire run, every move is smaller
+            // than the play, and nothing is ever delivered. Rigs that converged at 0.5' ended
+            // 82' out. The archive missed it because its 56'-play rig started 256' out, so
+            // only the endgame fell inside the band.
+            //
+            // In that regime there is no good answer - compensating risks injecting the play,
+            // not compensating loses every move to it - and the measured answer is that the
+            // old behaviour converges and this rule does not. So the rule stands down.
+            if (play * 2 > runStartedAtArcmin) { return 0; }
+            return System.Math.Max(play, System.Math.Min(multiple * play,
+                System.Math.Min(correctionCeiling, runStartedAtArcmin / 2)));
+        }
+
+        public double PlayHysteresisBandArcmin(Axis axis) => PlayHysteresisBand(
+            PlayOf(axis), PlayHysteresisMultiple, EffectiveMaxCorrectionMagnitude, runStartedAtArcmin);
+
+        private float PlayOf(Axis axis) =>
+            System.Math.Max(GetBacklashCompensation(axis), GetBacklashCompensationNegative(axis));
+
+        /// <summary>
+        /// The band this axis will use once an alignment reports where it stands, which is what
+        /// the panel has to show. The live band folds in the error the current run started with,
+        /// and outside a run that is zero - so reading the live value would tell a user with 4'
+        /// of measured play that there is no play at all. Shown before a run, used during one.
+        /// </summary>
+        public double ConfiguredPlayHysteresisBandArcmin(Axis axis) => PlayHysteresisBand(
+            PlayOf(axis), PlayHysteresisMultiple, EffectiveMaxCorrectionMagnitude, double.PositiveInfinity);
+
+        /// <summary>
+        /// True while the alignment is inside this axis's band. Compensating there executes
+        /// reversals whose direction is set by estimate jitter rather than by the error -
+        /// including the controller's 1' identification probe, which is five times the
+        /// residual it is trying to measure. Never engages before the loop has reported an
+        /// error, so panel nudging with no alignment running is unaffected.
+        /// </summary>
+        internal bool CompensationSuspended(Axis axis) {
+            var observed = LiveObservedErrorArcmin;
+            if (!PlayHysteresis || !observed.HasValue) { return false; }
+            var band = PlayHysteresisBandArcmin(axis);
+            return band > 0 && observed.Value < band;
+        }
+
+        /// <summary>
+        /// Reports the floor the error estimate itself imposes, when that floor is coarse
+        /// enough to matter. A loop cannot settle below the spread of the readings it is
+        /// settling on: it keeps correcting noise, and the corrections keep reversing. The
+        /// 18/08 session asked for 0.2' from a rig whose estimate moved 0.083' between
+        /// readings with nothing turning, and no mechanism could have delivered it.
+        ///
+        /// The wording deliberately states the floor rather than judging the user's
+        /// tolerance: the tolerance actually in force belongs to the sequence instruction and
+        /// can differ per item, so this VM cannot see it. The stored default is used only to
+        /// decide whether the floor is worth mentioning - a line shown every time is a line
+        /// nobody reads - and never quoted as if it were the value in use.
+        /// </summary>
+        public string ToleranceRealityStatus {
+            get {
+                var jitter = ErrorMonitor.EstimateJitterArcmin;
+                if (!jitter.HasValue || jitter.Value <= 0) { return string.Empty; }
+                var floor = ToleranceJitterFactor * jitter.Value;
+                if (floor <= Properties.Settings.Default.AlignmentTolerance) { return string.Empty; }
+                return $"The error estimate moves {jitter.Value:F2}' between readings with nothing moving, " +
+                    $"so the loop cannot settle below about {floor:F2}'. Check that your alignment " +
+                    "tolerance is above that.";
+            }
+        }
+
+        /// <summary>
+        /// How many times the estimate's own spread a tolerance has to be before it is worth
+        /// asking for. Three is the smallest ratio at which the confirmation rule - two
+        /// consecutive readings inside tolerance - is not mostly luck.
+        /// </summary>
+        private const double ToleranceJitterFactor = 3.0;
+
+        /// <summary>
+        /// Writes the rule's state once per run. Without it a tester's log shows the corrections
+        /// but not whether the play was being compensated, which is the first thing anyone
+        /// reading that log needs to know - and the band depends on the error the run started
+        /// with, so it cannot be reconstructed from the settings alone.
+        /// </summary>
+        private void LogPlayHysteresisState() {
+            if (!PlayHysteresis) {
+                Logger.Info($"OAPA play hysteresis: off - the play is compensated at every size " +
+                    $"(run starting at {runStartedAtArcmin:F2}')");
+                return;
+            }
+            var x = PlayHysteresisBandArcmin(Axis.XAxis);
+            var y = PlayHysteresisBandArcmin(Axis.YAxis);
+            Logger.Info($"OAPA play hysteresis: on at {PlayHysteresisMultiple:F1}x play, " +
+                $"run starting at {runStartedAtArcmin:F2}' - " +
+                $"X {Describe(x, PlayOf(Axis.XAxis))}, Y {Describe(y, PlayOf(Axis.YAxis))}");
+        }
+
+        private static string Describe(double band, float play) =>
+            play <= 0 ? "no measurable play"
+            : band <= 0 ? $"standing down ({play:F2}' of play is too much for this run)"
+            : $"below {band:F2}'";
+
+        public string PlayHysteresisStatus {
+            get {
+                if (!PlayHysteresis) { return "off: the play is compensated at every size"; }
+                var x = ConfiguredPlayHysteresisBandArcmin(Axis.XAxis);
+                var y = ConfiguredPlayHysteresisBandArcmin(Axis.YAxis);
+                if (x <= 0 && y <= 0) { return "no measurable play on either axis: nothing to leave uncompensated"; }
+                return $"below X {x:F2}' and Y {y:F2}' the play is left to absorb jitter, "
+                     + "unless a run starts closer in than twice the play";
+            }
         }
 
         /// <summary>
@@ -850,6 +1062,35 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
 
         public bool CanCalibrate() => Connected && IsNotMoving && !CalibrationRunning && CameraIsFree();
 
+        /// <summary>
+        /// Why the Calibrate button is disabled, or empty when it is not.
+        ///
+        /// A disabled control with no explanation costs a user their night. On 18/08 an
+        /// alignment halted, the halt told the user to re-run the Self-Calibration, and the
+        /// button was grey: a halt *pauses* the alignment rather than ending it, and a paused
+        /// alignment still holds the camera, so the remedy we had just recommended was
+        /// unavailable and nothing said so. They rebooted the machine.
+        ///
+        /// Kept as a pure function of the four conditions so it cannot drift away from
+        /// <see cref="CanCalibrate"/>: whatever disables the button is exactly what this
+        /// reports.
+        /// </summary>
+        internal static string CalibrationBlockedBy(bool connected, bool moving, bool calibrating, bool cameraBusy) {
+            if (!connected) { return "Connect the controller first."; }
+            if (calibrating) { return "A calibration is already running."; }
+            if (moving) { return "An axis is still moving."; }
+            if (cameraBusy) {
+                // The diagnosis alone leaves the user where they were: what unblocks them is
+                // knowing the alignment is still running even though it stopped correcting.
+                return "The camera is in use by the polar alignment. A halted alignment is only "
+                     + "paused, and still holds it - Stop the alignment, then calibrate.";
+            }
+            return string.Empty;
+        }
+
+        public string CalibrateUnavailableReason =>
+            CalibrationBlockedBy(Connected, !IsNotMoving, CalibrationRunning, !CameraIsFree());
+
         // The capture block owner is identified by reference; a dedicated token keeps the
         // camera-consumer plumbing off the public VM surface. A null mediator (tests,
         // headless hosts) means "always free" with no-op acquisition.
@@ -1062,8 +1303,13 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
                 // entitled to grant it. Applying a calibration is the only way it is ever granted.
                 SetCalibrationTrust(string.IsNullOrEmpty(DiscoveredTrustNote), DiscoveredTrustNote);
                 HasCalibrationResult = false;
-                CalibrationStatus = $"Applied. Backlash mode set to X: {XBacklashMode}, Y: {YBacklashMode} (from the measured X {Pair(DiscoveredXBacklash, DiscoveredXBacklashNegative)}, Y {Pair(DiscoveredYBacklash, DiscoveredYBacklashNegative)})";
-                Logger.Info($"OAPA calibration applied: X={DiscoveredXRatio:F2}, Y={DiscoveredYRatio:F2}, backlash X={Pair(DiscoveredXBacklash, DiscoveredXBacklashNegative)}, Y={Pair(DiscoveredYBacklash, DiscoveredYBacklashNegative)}, modes X={XBacklashMode}, Y={YBacklashMode}");
+                // Both messages report the pair that was *applied*, which is not always the pair
+                // that was measured: an unconfirmed direction split is applied as its mean. A log
+                // line stating the measured split next to a line saying the mean was applied reads
+                // as a contradiction, and the panel's reader has no way to tell which one the axis
+                // is now using.
+                CalibrationStatus = $"Applied. Backlash mode set to X: {XBacklashMode}, Y: {YBacklashMode} (applied X {Pair(xPositive, xNegative)}, Y {Pair(yPositive, yNegative)})";
+                Logger.Info($"OAPA calibration applied: X={DiscoveredXRatio:F2}, Y={DiscoveredYRatio:F2}, backlash X={Pair(xPositive, xNegative)}, Y={Pair(yPositive, yNegative)}, modes X={XBacklashMode}, Y={YBacklashMode}");
                 Notification.ShowInformation($"Calibration applied. Backlash mode X: {XBacklashMode}, Y: {YBacklashMode}", TimeSpan.FromSeconds(30));
             } catch (Exception ex) {
                 Logger.Error(ex);

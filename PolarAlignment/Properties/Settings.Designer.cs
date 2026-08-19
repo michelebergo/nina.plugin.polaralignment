@@ -493,6 +493,30 @@ namespace NINA.Plugins.PolarAlignment.Properties {
 
         [global::System.Configuration.UserScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("True")]
+        public bool OAPAPlayHysteresis {
+            get {
+                return ((bool)(this["OAPAPlayHysteresis"]));
+            }
+            set {
+                this["OAPAPlayHysteresis"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("3")]
+        public double OAPAPlayHysteresisMultiple {
+            get {
+                return ((double)(this["OAPAPlayHysteresisMultiple"]));
+            }
+            set {
+                this["OAPAPlayHysteresisMultiple"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
         [global::System.Configuration.DefaultSettingValueAttribute("0")]
         public float OAPAXCalibrationNoise {
             get {

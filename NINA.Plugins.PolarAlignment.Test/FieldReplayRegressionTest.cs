@@ -127,10 +127,28 @@ namespace NINA.Plugins.PolarAlignment.Test {
             public double AltProjection => Math.Cos(FieldAzimuthDegrees * Math.PI / 180.0);
             public double TrueTotalArcmin => Math.Sqrt(AzErrArcmin * AzErrArcmin + AltErrArcmin * AltErrArcmin);
 
-            public double Noise() {
-                if (NoiseAmplitudeArcmin <= 0) { return 0; }
+            /// <summary>
+            /// Spread of the *polar error estimate* between consecutive solves. This is not the
+            /// plate-solve noise the calibration measures: near the pole a small position error
+            /// maps to a larger polar-alignment error, so the two differ by a lot. The 18/08 rig
+            /// measured 0.01' of solve noise and wandered 0.083' in azimuth between consecutive
+            /// readings with nothing but the altitude axis moving. Conflating the two is why that
+            /// rig first looked healthy in this harness while the field log shows it collapsing.
+            /// Defaults to the solve noise, so every scenario written before the distinction
+            /// existed keeps its exact behaviour.
+            /// </summary>
+            public double EstimateJitterArcmin;
+
+            /// <summary>What a single plate solve measures.</summary>
+            public double Noise() => Sample(NoiseAmplitudeArcmin);
+
+            /// <summary>What the correction loop reads, as opposed to what a solve measures.</summary>
+            public double Jitter() => Sample(EstimateJitterArcmin > 0 ? EstimateJitterArcmin : NoiseAmplitudeArcmin);
+
+            private double Sample(double amplitude) {
+                if (amplitude <= 0) { return 0; }
                 rng = rng * 1664525u + 1013904223u;
-                return ((rng >> 8) / (double)(1 << 24) - 0.5) * 2 * NoiseAmplitudeArcmin;
+                return ((rng >> 8) / (double)(1 << 24) - 0.5) * 2 * amplitude;
             }
 
             public void MoveX(double logical) { AzErrArcmin -= X.Move(logical); }
@@ -177,6 +195,65 @@ namespace NINA.Plugins.PolarAlignment.Test {
             }
         }
 
+        // ===== The rule against rigs the archive does not contain =====
+        //
+        // The recorded scenarios prove the play hysteresis on the twenty rigs that happened
+        // to be logged. They cannot say whether it has a bad regime somewhere else, and it
+        // did: with a play comparable to the whole misalignment the band covered the entire
+        // run, every move was smaller than the play, and rigs converging at 0.5' ended 80'
+        // out. That found the third bound (the rule stands down when the play is more than
+        // half the error the run started with). This test keeps the search running.
+
+        [Test]
+        public void AcrossEightHundredSyntheticRigs_TheRuleIsNetPositive_AndNeverCatastrophic() {
+            var rng = new Random(20260819);
+            var plays = new[] { 0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 56.0 };
+            var jitters = new[] { 0.01, 0.05, 0.1, 0.25, 0.5 };
+            var initials = new[] { 5.0, 20.0, 60.0, 200.0, 400.0 };
+            var modes = new[] { OapaBacklashMode.Full, OapaBacklashMode.Unidirectional };
+            int convergedWithout = 0, convergedWith = 0, worse = 0, better = 0;
+            double worstWithout = 0, worstWith = 0;
+
+            foreach (var play in plays)
+            foreach (var jitter in jitters)
+            foreach (var initial in initials)
+            foreach (var mode in modes)
+            foreach (var trial in new[] { 0, 1 }) {
+                var respFwd = 0.85 + rng.NextDouble() * 0.30;
+                var respRev = 0.85 + rng.NextDouble() * 0.30;
+                var noise = 0.005 + rng.NextDouble() * 0.10;
+                var fieldAz = rng.NextDouble() * 55.0;
+                var split = rng.NextDouble();
+                var err = new double[2];
+                for (var k = 0; k < 2; k++) {
+                    var rig = new FieldRig {
+                        AzErrArcmin = -initial * 0.9, AltErrArcmin = initial * 0.3,
+                        NoiseAmplitudeArcmin = noise, EstimateJitterArcmin = jitter,
+                        FieldAzimuthDegrees = fieldAz
+                    };
+                    rig.X.ResponseFwd = respFwd; rig.X.ResponseRev = respRev; rig.X.DeadbandArcmin = play;
+                    rig.Y.ResponseFwd = respRev; rig.Y.ResponseRev = respFwd; rig.Y.DeadbandArcmin = play * 0.7;
+                    rig.X.InitEngagement(); rig.Y.InitEngagement();
+                    var x = new AppliedAxis { Mode = mode, BacklashPos = (float)(play * split * 2), BacklashNeg = (float)(play * (1 - split) * 2), PlayHysteresisMultiple = k == 0 ? 0 : 3 };
+                    var y = new AppliedAxis { Mode = mode, BacklashPos = (float)(play * 0.7), BacklashNeg = (float)(play * 0.7), PlayHysteresisMultiple = k == 0 ? 0 : 3 };
+                    var r = RunAlignment(rig, x, y, toleranceArcmin: 0.5);
+                    err[k] = r.TrueFinalErrorArcmin;
+                    if (r.Outcome == ReplayOutcome.Converged) { if (k == 0) { convergedWithout++; } else { convergedWith++; } }
+                }
+                worstWithout = Math.Max(worstWithout, err[0]);
+                worstWith = Math.Max(worstWith, err[1]);
+                if (err[1] > err[0] + 0.5 && err[1] > err[0] * 1.2) { worse++; }
+                if (err[0] > err[1] + 0.5 && err[0] > err[1] * 1.2) { better++; }
+            }
+
+            TestContext.WriteLine($"converge {convergedWithout} -> {convergedWith}, peggiora {worse}, migliora {better}, " +
+                $"peggior caso {worstWithout:F1}' -> {worstWith:F1}'");
+
+            convergedWith.Should().BeGreaterThan(convergedWithout, "the rule has to earn its place off the archive too");
+            better.Should().BeGreaterThan(2 * worse, "improvements must outweigh regressions by a wide margin");
+            worstWith.Should().BeLessThan(worstWithout * 1.05, "no rig may be made catastrophically worse");
+        }
+
         // ----- Calibrate + Apply, the way the panel does it -----
 
         private sealed class AppliedAxis {
@@ -190,6 +267,31 @@ namespace NINA.Plugins.PolarAlignment.Test {
             /// the scenarios written before it existed keep exercising what they were written for.
             /// </summary>
             public float MinimumReversalArcmin;
+
+            /// <summary>
+            /// Play hysteresis, mirroring UniversalPolarAlignmentOAPAVM: below the band the
+            /// axis stops compensating so its own play absorbs reversals whose direction comes
+            /// from estimate jitter. Defaults to the shipped 3x so the suite exercises what
+            /// ships; a scenario that documents a defect in the shared controller turns it off
+            /// explicitly, and says why.
+            /// </summary>
+            public double PlayHysteresisMultiple = 3.0;
+
+            /// <summary>
+            /// The production definition, called rather than copied: this suite is the whole
+            /// evidence that the rule works, and it stops being evidence the moment the two
+            /// can drift apart.
+            /// </summary>
+            public double BandArcmin(double correctionCeilingArcmin, double runStartedAtArcmin) =>
+                UniversalPolarAlignmentOAPAVM.PlayHysteresisBand(
+                    Math.Max(BacklashPos, BacklashNeg), PlayHysteresisMultiple,
+                    correctionCeilingArcmin, runStartedAtArcmin);
+
+            /// <summary>What the planner is handed once the band is taken into account.</summary>
+            public (OapaBacklashMode mode, float pos, float neg, float floor) AsPlanned(double measuredTotalError, double ceiling, double largestSeen)
+                => measuredTotalError < BandArcmin(ceiling, largestSeen)
+                    ? (OapaBacklashMode.Off, 0f, 0f, 0f)
+                    : (Mode, BacklashPos, BacklashNeg, MinimumReversalArcmin);
         }
 
         private static async Task<AppliedAxis> CalibrateAndApply(FieldRig rig, RigAxis axis, float currentRatio = 100f,
@@ -240,13 +342,15 @@ namespace NINA.Plugins.PolarAlignment.Test {
             var moved = false;
             var first = true;
             var verificationRan = false;
+            double highestSeen = 0;
 
             for (var cycle = 1; cycle <= 120; cycle++) {
                 driftAz += conditions.EstimateDriftAzPerCycle;
                 driftAlt += conditions.EstimateDriftAltPerCycle;
-                var azM = rig.AzErrArcmin + driftAz + rig.Noise();
-                var altM = rig.AltErrArcmin + driftAlt + rig.Noise();
+                var azM = rig.AzErrArcmin + driftAz + rig.Jitter();
+                var altM = rig.AltErrArcmin + driftAlt + rig.Jitter();
                 var total = Math.Sqrt(azM * azM + altM * altM);
+                if (highestSeen <= 0) { highestSeen = total; }   // the error this run started with
 
                 var decision = monitor.Observe(total, lastCmdMag, moved, first);
                 first = false;
@@ -276,6 +380,23 @@ namespace NINA.Plugins.PolarAlignment.Test {
                         Outcome = ReplayOutcome.FalseSuccess, Cycles = cycle,
                         TrueFinalErrorArcmin = rig.TrueTotalArcmin, VerificationRan = true, Reason = decision.Reason
                     };
+                }
+                if (decision.Action == ConvergenceAction.HaltEstimateDrift && !verificationRan) {
+                    // Production does not stop here. A drift halt means the estimate is no longer
+                    // trustworthy, which is exactly what a fresh three-point measurement fixes, so
+                    // with AutoVerificationRun on - the beta default, and what every field session
+                    // in this suite ran with - the instruction hands over to the verification run
+                    // instead of pausing (Instructions/PolarAlignment.cs:685). That run re-activates
+                    // the first step, which resets the controller (TPAPAVM.cs:112): a fresh
+                    // determination is a fresh identification problem, learned response included.
+                    // Valo's 18/08 session took this path twice, finishing at 0.34' and 0.16'.
+                    verificationRan = true;
+                    driftAz = 0; driftAlt = 0;
+                    monitor = new ConvergenceMonitor(toleranceArcmin);
+                    first = true;
+                    lastCmdMag = 0;
+                    controller.Reset();
+                    continue;
                 }
                 if (decision.Action == ConvergenceAction.HaltCalibrationSuspect || decision.Action == ConvergenceAction.HaltEstimateDrift) {
                     return new ReplayResult {
@@ -324,13 +445,15 @@ namespace NINA.Plugins.PolarAlignment.Test {
                 }
 
                 if (Math.Abs(plan.XMagnitude) > 0) {
-                    foreach (var leg in BacklashModePlanner.PlanMoves(x.Mode, (float)plan.XMagnitude, x.BacklashPos, x.BacklashNeg, lastX, x.MinimumReversalArcmin)) {
+                    var px = x.AsPlanned(total, 30.0, highestSeen);
+                    foreach (var leg in BacklashModePlanner.PlanMoves(px.mode, (float)plan.XMagnitude, px.pos, px.neg, lastX, px.floor)) {
                         rig.MoveX(leg);
                         if (Math.Abs(leg) > 0) { lastX = leg >= 0 ? LastDirection.Positive : LastDirection.Negative; }
                     }
                 }
                 if (Math.Abs(plan.YMagnitude) > 0) {
-                    foreach (var leg in BacklashModePlanner.PlanMoves(y.Mode, (float)plan.YMagnitude, y.BacklashPos, y.BacklashNeg, lastY, y.MinimumReversalArcmin)) {
+                    var py = y.AsPlanned(total, 30.0, highestSeen);
+                    foreach (var leg in BacklashModePlanner.PlanMoves(py.mode, (float)plan.YMagnitude, py.pos, py.neg, lastY, py.floor)) {
                         rig.MoveY(leg);
                         if (Math.Abs(leg) > 0) { lastY = leg >= 0 ? LastDirection.Positive : LastDirection.Negative; }
                     }
@@ -564,6 +687,9 @@ namespace NINA.Plugins.PolarAlignment.Test {
             var x = await CalibrateAndApply(rig, rig.X);
             var y = await CalibrateAndApply(rig, rig.Y);
             ApplyStrGazerAltitudePair(y, minimumReversalArcmin);
+            // Play hysteresis off: this scenario documents what the estimator does on its own.
+            // The companion test below shows what the hysteresis changes about the outcome.
+            x.PlayHysteresisMultiple = 0; y.PlayHysteresisMultiple = 0;
 
             var result = RunAlignment(rig, x, y, new LoopConditions { EstimateDriftAzPerCycle = 0.2 });
 
@@ -571,6 +697,122 @@ namespace NINA.Plugins.PolarAlignment.Test {
                 $"{result.Reason} (true error {result.TrueFinalErrorArcmin:F2}' after {result.Cycles} cycles)");
             result.TrueFinalErrorArcmin.Should().BeGreaterThan(2.0,
                 "the announced figure and the truth part company by several times the tolerance");
+        }
+
+        [Test]
+        public async Task StrGazerReal_20260816_EstimatorDrift_WithThePlayHysteresis_StopsBeingALie() {
+            // Same drift, same rig, shipped defaults. The hysteresis cannot see the drift and
+            // does not correct it - the platform still ends several arcminutes out. What it
+            // removes is the *claim*: without the jitter-driven reversals the loop no longer
+            // walks itself into a state where its own figure looks converged, so the run ends
+            // on an honest halt the user can act on instead of a success that is not one.
+            var rig = StrGazer20260816();
+            var x = await CalibrateAndApply(rig, rig.X);
+            var y = await CalibrateAndApply(rig, rig.Y);
+            ApplyStrGazerAltitudePair(y, 0.35f);
+
+            var result = RunAlignment(rig, x, y, new LoopConditions { EstimateDriftAzPerCycle = 0.2 });
+
+            result.Outcome.Should().NotBe(ReplayOutcome.FalseSuccess, result.Reason);
+            result.Outcome.Should().Be(ReplayOutcome.HonestHalt,
+                $"true error {result.TrueFinalErrorArcmin:F2}' after {result.Cycles} cycles");
+        }
+
+        [Test]
+        public async Task ValoReal_20260818_TheOneArcminuteProbe_ThrowsAwayAConvergedAlignment() {
+            // valo_20260818-201256, run 4 (and run 3 before it, identically): the cleanest rig in
+            // the archive - calibration repeatable to 0.15%, 0.01' of solve noise - walked 6 deg 50'
+            // of error down to 22 arcseconds and then threw it away in three moves.
+            //
+            // The chain, verified in the controller: a 22"->26" reading is a 18% worsening, which
+            // is above ModelResetWorseningFactor, so the learned response is discarded; without it
+            // the controller falls back to a probe; DefaultProbeMagnitude scales with the error only
+            // upwards, so below 6.7' of error the probe is always 1'; and 1' against 0.2' of
+            // remaining error overshoots by five times. The companion test below shows what turns
+            // that overshoot into a collapse.
+            var rig = Valo20260818();
+            var (x, y) = await CalibrateAndApplyValo(rig, compensating: true);
+            // Play hysteresis off: this is the reproduction of the controller's probe floor,
+            // and it has to keep failing for as long as that floor is there. The mitigation
+            // is the test below.
+            x.PlayHysteresisMultiple = 0; y.PlayHysteresisMultiple = 0;
+
+            var result = RunAlignment(rig, x, y, toleranceArcmin: 0.2);
+
+            result.Outcome.Should().Be(ReplayOutcome.HonestHalt,
+                $"the field session halted the same way ({result.Reason})");
+            result.TrueFinalErrorArcmin.Should().BeGreaterThan(1.0,
+                $"an alignment that had reached 22 arcseconds ends far outside tolerance ({result.Cycles} cycles)");
+        }
+
+        [Test]
+        public async Task ValoReal_20260818_ThePlayHysteresis_MakesTheProbeHarmless() {
+            // Shipped defaults on the same rig. The 1' probe still arrives, and the axis still
+            // carries 2.27' of play - but inside the band the play is no longer cancelled, so
+            // the probe is absorbed by the mechanism instead of being delivered faithfully to
+            // an alignment that had reached 22 arcseconds. This is a filter, not a fix: the
+            // probe floor is still wrong, and the issue against it stands.
+            var rig = Valo20260818();
+            var (x, y) = await CalibrateAndApplyValo(rig, compensating: true);
+
+            var result = RunAlignment(rig, x, y, toleranceArcmin: 0.2);
+
+            result.Outcome.Should().Be(ReplayOutcome.Converged, result.Reason);
+            result.TrueFinalErrorArcmin.Should().BeLessThan(0.4, $"after {result.Cycles} cycles");
+        }
+
+        [Test]
+        public async Task ValoReal_20260818_WithoutOurCompensation_TheSameProbeIsSurvivable() {
+            // Same rig, same jitter, same 1' probe from the same controller - only our backlash
+            // compensation removed. It converges. So the probe floor alone is survivable, and what
+            // turns it into a collapse is OAPA's own compensation multiplying a 1' probe into 3.27'
+            // of commanded motion.
+            //
+            // That is the whole argument for the issue, and it cuts both ways: half the fault is in
+            // the core's probe floor, half is ours. A probe is an identification move; compensating
+            // it corrupts the very sample it exists to produce - but IsProbe lives in the
+            // controller's plan and never reaches the axis layer.
+            var rig = Valo20260818();
+            var (x, y) = await CalibrateAndApplyValo(rig, compensating: false);
+
+            var result = RunAlignment(rig, x, y, toleranceArcmin: 0.2);
+
+            result.Outcome.Should().Be(ReplayOutcome.Converged, result.Reason);
+            result.TrueFinalErrorArcmin.Should().BeLessThan(0.4, $"after {result.Cycles} cycles");
+        }
+
+        /// <summary>
+        /// The 18/08 rig: Az -6deg00'34", Alt +3deg16'13", responses within 1.5% of unity, and an
+        /// estimate that wanders 0.083' between consecutive readings while its plate solves are
+        /// clean to 0.01' - the distinction that decides whether this scenario reproduces at all.
+        /// </summary>
+        private static FieldRig Valo20260818() {
+            var rig = new FieldRig {
+                AzErrArcmin = -360.6,
+                AltErrArcmin = 196.2,
+                NoiseAmplitudeArcmin = 0.01,
+                EstimateJitterArcmin = 0.083,
+                FieldAzimuthDegrees = 14.3
+            };
+            rig.X.ResponseFwd = 0.987; rig.X.ResponseRev = 1.012; rig.X.DeadbandArcmin = 2.6; rig.X.DeadbandVariationArcmin = 0.6;
+            rig.Y.ResponseFwd = 0.998; rig.Y.ResponseRev = 0.999; rig.Y.DeadbandArcmin = 2.27;
+            rig.X.InitEngagement(); rig.Y.InitEngagement();
+            return rig;
+        }
+
+        /// <summary>Applies that night's second calibration, with or without its compensation.</summary>
+        private static async Task<(AppliedAxis x, AppliedAxis y)> CalibrateAndApplyValo(FieldRig rig, bool compensating) {
+            var x = await CalibrateAndApply(rig, rig.X);
+            var y = await CalibrateAndApply(rig, rig.Y);
+            x.Mode = compensating ? OapaBacklashMode.Unidirectional : OapaBacklashMode.Off;
+            y.Mode = compensating ? OapaBacklashMode.Full : OapaBacklashMode.Off;
+            x.BacklashPos = compensating ? 2.05f : 0f;
+            x.BacklashNeg = compensating ? 3.23f : 0f;
+            y.BacklashPos = y.BacklashNeg = compensating ? 2.27f : 0f;
+            // What the VM supplies in production: max(5 sigma, 0.25') on a rig whose solve noise is
+            // 0.01'. It does not fire here - the harmful command is 1', well above it.
+            x.MinimumReversalArcmin = y.MinimumReversalArcmin = 0.25f;
+            return (x, y);
         }
 
         private static FieldRig StrGazer20260816() {

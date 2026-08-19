@@ -40,6 +40,7 @@
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
                 <TextBlock Grid.Row="0" Grid.Column="0" HorizontalAlignment="Center" Text="Azimuth" />
@@ -49,6 +50,16 @@
                 <TextBlock Grid.Row="1" Grid.Column="0" HorizontalAlignment="Center" FontWeight="Bold" Text="{Binding AzimuthErrorDisplay}" />
                 <TextBlock Grid.Row="1" Grid.Column="1" HorizontalAlignment="Center" FontWeight="Bold" Text="{Binding AltitudeErrorDisplay}" />
                 <TextBlock Grid.Row="1" Grid.Column="2" HorizontalAlignment="Center" FontWeight="Bold" Text="{Binding TotalErrorDisplay}" />
+                <!-- Only appears when the tolerance being asked for is finer than the estimate's
+                     own spread between readings, which no mechanism can deliver. Empty otherwise:
+                     a line that is always there stops being read. -->
+                <TextBlock
+                    Grid.Row="2"
+                    Grid.ColumnSpan="3"
+                    Margin="0,6,0,0"
+                    Opacity="0.75"
+                    Text="{Binding ToleranceRealityStatus}"
+                    TextWrapping="Wrap" />
             </Grid>
         </GroupBox>
 
@@ -377,6 +388,22 @@
                     <Button Grid.Column="0" Height="25" Margin="5" Padding="10,0" Command="{Binding CalibrateGearRatiosCommand}">Calibrate</Button>
                     <TextBlock Grid.Column="1" Margin="5" VerticalAlignment="Center" TextWrapping="Wrap" Text="{Binding CalibrationStatus}" />
                 </Grid>
+
+                <!-- Why the button above is disabled. A grey control with no explanation cost a
+                     tester their night on 18/08: the halt message told him to re-calibrate, and
+                     the button was dead because the halted alignment still held the camera.
+                     Collapses to nothing when there is nothing in the way. -->
+                <TextBlock Margin="5,0,5,5" TextWrapping="Wrap" Opacity="0.75" Text="{Binding CalibrateUnavailableReason}">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding CalibrateUnavailableReason}" Value="">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
 
                 <Grid Margin="5,5,5,0" Visibility="{Binding HasCalibrationResult, Converter={StaticResource BooleanToVisibilityConverter}}">
                     <Grid.RowDefinitions>

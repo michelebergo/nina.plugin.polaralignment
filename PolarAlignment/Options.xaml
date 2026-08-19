@@ -44,6 +44,8 @@
     <s:String x:Key="ReverseAltitudeToolTip">Negates altitude-axis nudge and move commands sent through the selected hardware system.</s:String>
     <s:String x:Key="AzimuthBacklashCompensationToolTip">If non-zero and the azimuth movement direction changes, TPPA sends an extra negative-then-positive relative X move of this size after the main move.</s:String>
     <s:String x:Key="MaxCorrectionMagnitudeToolTip">Safety ceiling for the per-cycle correction size of the automated OAPA adjustments. The effective limit auto-scales with the measured error (80% of the current total error, minimum 5); this value only caps it. Range 1-60 arcmin, default 30; values above 30 are an opt-in for multi-degree initial errors — fewer coarse cycles, but a larger worst-case excursion before the runaway detection stops the moves.</s:String>
+    <s:String x:Key="PlayHysteresisToolTip">Close to the target the polar-error estimate wanders more than the error that is left: near the pole a rig measuring 0.01 arcmin of plate-solve noise was seen to move 0.083 arcmin between consecutive readings while nothing but the other axis had moved. The direction of each requested correction is then set largely by that wander, and compensating the mechanical play executes every one of those reversals faithfully - including the correction controller's 1 arcmin identification move, which at half an arcminute from the target is several times the error it is trying to measure. With this on, an axis stops compensating once the remaining error falls inside the band below, so its own play absorbs those reversals instead. It is a filter and not a cure: the axis still converges by approaching from the engaged side, and nothing is given up in speed. Across the field replay suite it converges on 16 of 20 recorded rigs instead of 12, removes both cases where the loop announced success it had not achieved, and takes the same number of cycles.</s:String>
+    <s:String x:Key="PlayHysteresisMultipleToolTip">Width of the band, in multiples of the play measured on that axis. The band is bounded at both ends and neither bound is yours to cross: it never exceeds the correction ceiling, because a band covering the whole coarse phase would mean never compensating at all - which left a rig carrying 56 arcmin of play more than 4 degrees out in replay - and it is never narrower than one play, because an axis whose play exceeds the largest move allowed cannot be compensated safely at any error. Between those, higher means the axis stops compensating earlier. Above 3 the replay outcome stops changing, which is why 3 is the default; 0 turns the rule off exactly like clearing the box.</s:String>
     <s:String x:Key="AdaptiveSpeedUpToolTip">When the last applied Self-Calibration came back verified on both axes - direction established, no suspect response or backlash, the factor measured on full signal, and the platform returned to its starting position - the automated corrections use a larger step (the configurable maximum of 60 arcmin instead of your ceiling) and a shorter wait (0.5s instead of your settle time). The saving is in plate solves rather than motor time: from a 6-degree error the coarse phase takes about half as many cycles. The values you set above stay in force whenever the calibration is not verified, and with this off nothing changes at all. Editing a factor or backlash value by hand withdraws the verification until the next calibration.</s:String>
     <s:String x:Key="AutomatedAdjustmentsToolTip">When enabled, TPPA calls its automated correction routine and sends nudge commands through the selected hardware system during the correction phase.</s:String>
     <s:String x:Key="AutomatedAdjustmentSettleTimeToolTip">Number of seconds TPPA waits after each automated adjustment before continuing.</s:String>
@@ -576,17 +578,62 @@
                                         Visibility="{Binding ActiveSystem.SpeedUpUnlocked, Converter={StaticResource BooleanToVisibilityConverter}}" />
                                 </StackPanel>
                                 <!--  The unlock and the reason it is or is not in force. Without the
-                                      reason a rig that never earns it gives the user nothing to act on.  -->
-                                <CheckBox
-                                    Margin="5,8,0,0"
-                                    HorizontalAlignment="Left"
-                                    Content="Let a verified calibration speed up corrections"
-                                    IsChecked="{Binding ActiveSystem.AdaptiveSpeedUp}"
-                                    ToolTip="{StaticResource AdaptiveSpeedUpToolTip}" />
+                                      reason a rig that never earns it gives the user nothing to act on.
+
+                                      The caption is a TextBlock beside the box rather than the box's
+                                      own Content: the host styles CheckBox as a bare ON/OFF switch and
+                                      drops Content entirely, so every setting here carried a nameless
+                                      toggle. Everywhere else in this page the caption lives in the
+                                      grid's left column; these controls sit inside another setting's
+                                      row, so they carry their own.  -->
+                                <StackPanel Margin="5,8,0,0" Orientation="Horizontal">
+                                    <CheckBox
+                                        VerticalAlignment="Center"
+                                        IsChecked="{Binding ActiveSystem.AdaptiveSpeedUp}"
+                                        ToolTip="{StaticResource AdaptiveSpeedUpToolTip}" />
+                                    <TextBlock
+                                        Margin="8,0,0,0"
+                                        VerticalAlignment="Center"
+                                        Text="Let a verified calibration speed up corrections"
+                                        ToolTip="{StaticResource AdaptiveSpeedUpToolTip}" />
+                                </StackPanel>
                                 <TextBlock
                                     Margin="5,3,0,0"
                                     Opacity="0.6"
                                     Text="{Binding ActiveSystem.SpeedUpStatus}"
+                                    TextWrapping="Wrap" />
+                                <!--  Play hysteresis: the rule, its width, and the band it currently
+                                      produces on each axis. The band is shown because the multiple
+                                      alone says nothing - the same 3x is 6.8 arcmin on one rig and
+                                      128 on another.  -->
+                                <StackPanel Margin="5,10,0,0" Orientation="Horizontal">
+                                    <CheckBox
+                                        VerticalAlignment="Center"
+                                        IsChecked="{Binding ActiveSystem.PlayHysteresis}"
+                                        ToolTip="{StaticResource PlayHysteresisToolTip}" />
+                                    <TextBlock
+                                        Margin="8,0,0,0"
+                                        VerticalAlignment="Center"
+                                        Text="Let the mechanical play absorb jitter near the target"
+                                        ToolTip="{StaticResource PlayHysteresisToolTip}" />
+                                </StackPanel>
+                                <StackPanel Margin="5,5,0,0" Orientation="Horizontal">
+                                    <TextBlock
+                                        VerticalAlignment="Center"
+                                        Text="Band width"
+                                        ToolTip="{StaticResource PlayHysteresisMultipleToolTip}" />
+                                    <ninactrl:UnitTextBox
+                                        MinWidth="60"
+                                        Margin="8,0,0,0"
+                                        VerticalAlignment="Center"
+                                        Text="{Binding ActiveSystem.PlayHysteresisMultiple, StringFormat={}{0:0.#}}"
+                                        ToolTip="{StaticResource PlayHysteresisMultipleToolTip}"
+                                        Unit="x play" />
+                                </StackPanel>
+                                <TextBlock
+                                    Margin="5,3,0,0"
+                                    Opacity="0.6"
+                                    Text="{Binding ActiveSystem.PlayHysteresisStatus}"
                                     TextWrapping="Wrap" />
                             </StackPanel>
                         </Grid>

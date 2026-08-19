@@ -192,6 +192,74 @@ namespace NINA.Plugins.PolarAlignment.Test {
             await act.Should().NotThrowAsync();
             monitor.IsHeartbeatRunning.Should().BeFalse();
         }
+
+        // ===== Estimate jitter =====
+        //
+        // How much the polar-error estimate moves between two readings taken with the platform
+        // standing still. This is not the plate-solve noise the calibration measures: near the
+        // pole a small position error maps to a much larger polar-alignment error, and the
+        // 18/08 rig measured 0.01' of solve noise while its azimuth estimate wandered 0.083'
+        // between consecutive readings. A tolerance finer than a few times this number cannot
+        // be reached however good the mechanism is, and the user has no other way to find out.
+
+        [Test]
+        public async Task Jitter_IsMeasuredOnlyBetweenReadingsWithNoMovementInBetween() {
+            var monitor = Monitor();
+
+            await monitor.OnMessageReceived(ErrorMessage(0.0, 0.0, 0.0));
+            await monitor.OnMessageReceived(ErrorMessage(1.0 / 60, 0.0, 1.0 / 60));   // 1.0' apart, still
+            await monitor.OnMessageReceived(ErrorMessage(1.2 / 60, 0.0, 1.2 / 60));   // 0.2' apart, still
+
+            monitor.EstimateJitterArcmin.Should().BeApproximately(0.6, 1e-6, "median of 1.0' and 0.2'");
+        }
+
+        [Test]
+        public async Task Jitter_IgnoresThePairThatStraddlesACommandedMove() {
+            var monitor = Monitor();
+
+            await monitor.OnMessageReceived(ErrorMessage(0.0, 0.0, 0.0));
+            monitor.NoteMovementCommanded();
+            await monitor.OnMessageReceived(ErrorMessage(30.0 / 60, 0.0, 30.0 / 60));  // the move, not jitter
+            await monitor.OnMessageReceived(ErrorMessage(30.1 / 60, 0.0, 30.1 / 60));  // 0.1' of jitter
+            await monitor.OnMessageReceived(ErrorMessage(30.2 / 60, 0.0, 30.2 / 60));  // 0.1' of jitter
+
+            monitor.EstimateJitterArcmin.Should().BeApproximately(0.1, 1e-6);
+        }
+
+        [Test]
+        public async Task Jitter_TakesTheWorseAxis_NotTheTotal() {
+            // The 18/08 case exactly: the total looks steady because it is dominated by the
+            // other axis, while azimuth wanders. Reading the total would report nothing wrong.
+            var monitor = Monitor();
+
+            await monitor.OnMessageReceived(ErrorMessage(0.0, 5.0 / 60, 5.0 / 60));
+            await monitor.OnMessageReceived(ErrorMessage(0.5 / 60, 5.0 / 60, 5.02 / 60));
+
+            monitor.EstimateJitterArcmin.Should().BeApproximately(0.5, 1e-6);
+        }
+
+        [Test]
+        public async Task Jitter_IsUnknownUntilThereAreEnoughSamples() {
+            var monitor = Monitor();
+
+            monitor.EstimateJitterArcmin.Should().BeNull("nothing has been measured yet");
+            await monitor.OnMessageReceived(ErrorMessage(0.0, 0.0, 0.0));
+            monitor.EstimateJitterArcmin.Should().BeNull("one reading is not a difference");
+        }
+
+        [Test]
+        public async Task Jitter_ForgetsAnExpiredRun() {
+            var monitor = Monitor();
+            await monitor.OnMessageReceived(ErrorMessage(0.0, 0.0, 0.0));
+            await monitor.OnMessageReceived(ErrorMessage(1.0 / 60, 0.0, 1.0 / 60));
+            monitor.EstimateJitterArcmin.Should().NotBeNull();
+
+            now = now.AddHours(1);
+            await monitor.OnMessageReceived(ErrorMessage(0.0, 0.0, 0.0));
+
+            monitor.EstimateJitterArcmin.Should().BeNull(
+                "a reading an hour later belongs to a different session, and the gap is not jitter");
+        }
     }
 
     /// <summary>
@@ -208,6 +276,48 @@ namespace NINA.Plugins.PolarAlignment.Test {
 
         [TearDown]
         public void TearDown() => vm?.ErrorMonitor.Dispose();
+
+        // ----- Tolerance against the estimate's own spread -----
+
+        private async Task Wander(double arcminBetweenReadings, int readings = 4) {
+            for (var i = 0; i < readings; i++) {
+                var az = (i % 2 == 0 ? 0 : arcminBetweenReadings) / 60.0;
+                await vm.ErrorMonitor.OnMessageReceived(new FakeMessage {
+                    Topic = AlignmentErrorMonitor.ErrorTopic,
+                    Content = new { AzimuthError = az, AltitudeError = 0.0, TotalError = Math.Abs(az) }
+                });
+            }
+        }
+
+        [Test]
+        public void WithNothingMeasured_TheToleranceCheckSaysNothing() {
+            vm = new UniversalPolarAlignmentOAPAVM(null, null, null, null, null);
+            vm.ToleranceRealityStatus.Should().BeEmpty();
+        }
+
+        [Test]
+        public async Task AnEstimateTooCoarseForTheTolerance_ReportsTheFloorItImposes() {
+            vm = new UniversalPolarAlignmentOAPAVM(null, null, null, null, null);
+            Properties.Settings.Default.AlignmentTolerance = 0.2;   // the 18/08 request
+
+            await Wander(0.083);   // the 18/08 rig
+
+            // States the floor, not a verdict on the tolerance: the value actually in force
+            // lives on the sequence instruction and can differ per item, so quoting it here
+            // would be asserting something this VM cannot know.
+            vm.ToleranceRealityStatus.Should().Contain("0.08'").And.Contain("0.25'");
+            vm.ToleranceRealityStatus.Should().NotContain("The alignment tolerance is");
+        }
+
+        [Test]
+        public async Task AToleranceWellClearOfTheSpread_IsNotCommentedOn() {
+            vm = new UniversalPolarAlignmentOAPAVM(null, null, null, null, null);
+            Properties.Settings.Default.AlignmentTolerance = 0.5;
+
+            await Wander(0.02);
+
+            vm.ToleranceRealityStatus.Should().BeEmpty("a warning shown always is a warning nobody reads");
+        }
 
         [Test]
         public void WithNoMeasurement_AllThreeReadEmDash() {

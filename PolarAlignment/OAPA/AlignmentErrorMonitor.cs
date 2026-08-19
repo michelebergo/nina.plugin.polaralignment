@@ -1,6 +1,7 @@
 using NINA.Core.Utility;
 using NINA.Plugin.Interfaces;
 using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 
 namespace NINA.Plugins.PolarAlignment.OAPA {
@@ -78,6 +79,75 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
         public double? AltitudeErrorArcmin => IsLive ? altitudeDegrees * 60.0 : null;
         public double? TotalErrorArcmin => IsLive ? totalDegrees * 60.0 : null;
 
+        // ----- Estimate jitter -----
+        //
+        // How far the polar-error estimate moves between two readings taken with the platform
+        // standing still. This is emphatically not the plate-solve noise the calibration
+        // measures: near the pole a small position error maps to a much larger polar
+        // misalignment, and the 2026-08-18 rig measured 0.01' of solve noise while its azimuth
+        // estimate wandered 0.083' between consecutive readings with only the other axis
+        // moving. It bounds what any tolerance can achieve, and nothing else reports it.
+
+        private const int JitterWindow = 12;
+        private readonly object jitterGate = new();
+        private readonly List<double> jitterSamples = new();
+        private double previousAzimuthDegrees;
+        private double previousAltitudeDegrees;
+        private DateTime? previousReadingAt;
+        private volatile bool movedSinceLastReading;
+
+        /// <summary>
+        /// Told by the axis layer that it has commanded motion, so the next difference is the
+        /// move rather than jitter. Deliberately a bare flag: it is set on the correction
+        /// loop's thread and read on whichever thread the broker delivers on, and a lost
+        /// update can only cost one sample.
+        /// </summary>
+        public void NoteMovementCommanded() => movedSinceLastReading = true;
+
+        /// <summary>
+        /// Median of the recent still-platform differences, in arcminutes, or null while there
+        /// is nothing to go on. The median rather than the mean because a single mis-solve
+        /// would otherwise set the number for the rest of the run.
+        /// </summary>
+        public double? EstimateJitterArcmin {
+            get {
+                lock (jitterGate) {
+                    if (jitterSamples.Count == 0) { return null; }
+                    var ordered = new List<double>(jitterSamples);
+                    ordered.Sort();
+                    var middle = ordered.Count / 2;
+                    return ordered.Count % 2 == 1
+                        ? ordered[middle]
+                        : (ordered[middle - 1] + ordered[middle]) / 2.0;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Records the difference against the previous reading when nothing was commanded in
+        /// between. A gap longer than the expiry ends the run as far as this is concerned: the
+        /// platform may have been moved by hand, the mount reparked, the window reopened, so
+        /// the difference across it is not a measurement of anything.
+        /// </summary>
+        private void RecordJitter(double azimuth, double altitude, DateTime at) {
+            var continuous = previousReadingAt.HasValue && at - previousReadingAt.Value <= Expiry;
+            if (!continuous) {
+                lock (jitterGate) { jitterSamples.Clear(); }
+            } else if (!movedSinceLastReading) {
+                var worstAxis = Math.Max(Math.Abs(azimuth - previousAzimuthDegrees),
+                                         Math.Abs(altitude - previousAltitudeDegrees)) * 60.0;
+                lock (jitterGate) {
+                    jitterSamples.Add(worstAxis);
+                    if (jitterSamples.Count > JitterWindow) { jitterSamples.RemoveAt(0); }
+                }
+            }
+
+            previousAzimuthDegrees = azimuth;
+            previousAltitudeDegrees = altitude;
+            previousReadingAt = at;
+            movedSinceLastReading = false;
+        }
+
         /// <summary>Test-only visibility into whether the lazily-started heartbeat is currently ticking.</summary>
         internal bool IsHeartbeatRunning {
             get {
@@ -101,10 +171,12 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
                     return Task.CompletedTask;
                 }
 
+                var at = clock();
+                RecordJitter(azimuth.Value, altitude.Value, at);
                 azimuthDegrees = azimuth.Value;
                 altitudeDegrees = altitude.Value;
                 totalDegrees = Math.Abs(total.Value);
-                receivedAt = clock();
+                receivedAt = at;
             } catch (Exception ex) {
                 // A broker callback must never throw: the publisher is the alignment loop.
                 Logger.Error(ex);
