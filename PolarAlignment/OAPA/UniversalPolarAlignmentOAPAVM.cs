@@ -820,9 +820,10 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
                 $"X {Describe(x, PlayOf(Axis.XAxis))}, Y {Describe(y, PlayOf(Axis.YAxis))}");
         }
 
-        private static string Describe(double band, float play) =>
+        private string Describe(double band, float play) =>
             play <= 0 ? "no measurable play"
-            : band <= 0 ? $"standing down ({play:F2}' of play is too much for this run)"
+            : PlayHysteresisMultiple <= 0 ? "off (band width set to zero)"
+            : band <= 0 ? $"standing down ({play:F2}' of play is too much for a run starting at {runStartedAtArcmin:F2}')"
             : $"below {band:F2}'";
 
         public string PlayHysteresisStatus {

@@ -508,6 +508,18 @@ namespace NINA.Plugins.PolarAlignment.Test {
             vm.PlayHysteresisBandArcmin(Axis.YAxis).Should().BeApproximately(12, 1e-9);
         }
 
+        [Test]
+        public void AZeroBandWidth_IsNotReportedAsAPlayProblem() {
+            // Field log 19/08: a tester set the band width to zero and the log said "standing
+            // down (3.23' of play is too much for this run)" on a rig whose run started at
+            // five degrees. The play was fine; the rule was simply switched off by the number.
+            var (vm, _) = HysteresisVm(play: 4f, multiple: 0);
+            Observing(vm, 1.0);
+
+            vm.PlayHysteresisStatus.Should().NotContain("too much");
+            vm.PlayHysteresisBandArcmin(Axis.YAxis).Should().Be(0);
+        }
+
         // ===== Why the Calibrate button is disabled =====
         //
         // Field report (18/08): an alignment halted, the halt message told the user to
