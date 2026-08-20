@@ -41,15 +41,32 @@ namespace NINA.Plugins.PolarAlignment {
         internal const double CalibrationSuspectMoveArcmin = 1.0;
         internal const int BestEffortOscillations = 4;
 
+        /// <summary>
+        /// How much larger than the estimate's own jitter a residual has to be before it is
+        /// worth another correction. Three, the same multiple the panel uses to decide that a
+        /// tolerance is finer than the estimate can resolve: below it, "improvement" and
+        /// "noise" are the same measurement.
+        /// </summary>
+        internal const double ImprovementFloorJitterFactor = 3.0;
+
         private readonly double toleranceArcmin;
+        private readonly Func<double?>? estimateJitterArcmin;
         private double? previousErrorArcmin;
         private int consecutiveBelowTolerance;
         private int consecutiveWorsenings;
         private int oscillationsSinceMinimum;
         private double recentLargestMoveArcmin;
 
-        public ConvergenceMonitor(double toleranceArcmin) {
+        /// <param name="estimateJitterArcmin">
+        /// How far the error estimate wanders between solves with nothing moving, when that
+        /// has been measured. It is read fresh on each observation rather than captured,
+        /// because it is measured during the run. Null - no measurement, or a system that
+        /// does not take one - restores the behaviour of stopping at the first reading below
+        /// tolerance.
+        /// </param>
+        public ConvergenceMonitor(double toleranceArcmin, Func<double?>? estimateJitterArcmin = null) {
             this.toleranceArcmin = toleranceArcmin;
+            this.estimateJitterArcmin = estimateJitterArcmin;
         }
 
         public bool EstimateDegraded { get; private set; }
@@ -96,6 +113,16 @@ namespace NINA.Plugins.PolarAlignment {
             return decision;
         }
 
+        /// <summary>
+        /// The smallest residual worth another move: three times the estimate's own jitter.
+        /// Null when nothing has measured that jitter, in which case no extra correction is
+        /// attempted - an unmeasured floor is not a floor.
+        /// </summary>
+        private double? ImprovementFloor() {
+            var jitter = estimateJitterArcmin?.Invoke();
+            return jitter is > 0 ? ImprovementFloorJitterFactor * jitter.Value : null;
+        }
+
         private ConvergenceDecision Classify(double totalErrorArcmin) {
             if (totalErrorArcmin <= toleranceArcmin) {
                 consecutiveBelowTolerance++;
@@ -108,6 +135,25 @@ namespace NINA.Plugins.PolarAlignment {
                 if (consecutiveBelowTolerance >= RequiredConsecutiveBelowTolerance) {
                     return new ConvergenceDecision(ConvergenceAction.Finish,
                         $"Total error {totalErrorArcmin:0.00}' below tolerance for {consecutiveBelowTolerance} consecutive solves.");
+                }
+
+                // The tolerance says the run may stop, not that it must. Crossing it is not a
+                // reason to leave a residual that is plainly larger than the measurement can
+                // explain: a field case finished at 29.9" against a 30" tolerance while one
+                // axis still held 30" of it, when the move already being made would have taken
+                // the total to about 5". The confirmation solve has to happen anyway, so the
+                // interval before it is used to remove what is left.
+                //
+                // Bounded by construction rather than by a counter: the next reading below
+                // tolerance is the second confirmation and finishes the run, so this can add
+                // one correction per episode. A correction that makes things worse puts the
+                // error back above tolerance, where the existing oscillation and worsening
+                // detectors take over unchanged.
+                var floor = ImprovementFloor();
+                if (floor.HasValue && totalErrorArcmin > floor.Value && !EstimateDegraded) {
+                    return new ConvergenceDecision(ConvergenceAction.Continue,
+                        $"Below tolerance ({totalErrorArcmin:0.00}') but {floor.Value:0.00}' of it is larger than the " +
+                        "estimate's own noise; correcting once more before the confirmation solve.");
                 }
 
                 return new ConvergenceDecision(ConvergenceAction.AwaitConfirmation,

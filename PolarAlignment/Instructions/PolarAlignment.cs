@@ -77,6 +77,17 @@ namespace NINA.Plugins.PolarAlignment.Instructions {
         private bool eastDirection;
         private bool manualMode;
         private bool startFromCurrentPosition;
+        /// <summary>
+        /// Which beta build this is, written into every field log.
+        ///
+        /// The assembly version does not move between beta builds, so two of them are
+        /// indistinguishable once installed - a tester cannot say which one produced a log
+        /// and neither can we. That is fine until a build changes how the fine phase behaves,
+        /// at which point "which one were you running" becomes the first question and there
+        /// is no answer.
+        /// </summary>
+        internal const string BetaBuild = "rc17.9";
+
         private double alignmentTolerance;
         private IList<string> issues = new List<string>();
         private const string ResumeAlignmentTopic = $"{nameof(PolarAlignmentPlugin)}_{nameof(PolarAlignment)}_ResumeAlignment";
@@ -435,6 +446,7 @@ namespace NINA.Plugins.PolarAlignment.Instructions {
                 var currentPosition = telescopeMediator.GetInfo().Connected ? telescopeMediator.GetCurrentPosition().Transform(Latitude, Longitude) : null;
                 Logger.Info($"""
                     Starting polar alignment:
+                        Beta build: {BetaBuild}
                         Manual mode: {ManualMode}
                         Measure point distance: {TargetDistance}
                         Mount move rate: {MoveRate}
@@ -596,7 +608,15 @@ namespace NINA.Plugins.PolarAlignment.Instructions {
 
                             await TPAPAVM.UseImageCenterAsReference(localCTS.Token);
 
-                            var monitor = new ConvergenceMonitor(AlignmentTolerance);
+                            // The jitter is read through a delegate rather than captured: it is
+                            // measured while the run proceeds, and a value taken at the start
+                            // would be the one measurement that predates every solve it is used
+                            // to judge. Systems that do not measure it get null and the previous
+                            // behaviour.
+                            var monitor = new ConvergenceMonitor(
+                                AlignmentTolerance,
+                                () => (TPAPAVM.ActiveAlignmentSystemVM as OAPA.UniversalPolarAlignmentOAPAVM)
+                                          ?.ErrorMonitor?.EstimateJitterArcmin);
                             var firstObservation = true;
 
                             var sw = Stopwatch.StartNew();
