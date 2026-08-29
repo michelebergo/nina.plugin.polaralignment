@@ -1109,6 +1109,20 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
                 var speed = axis == Axis.XAxis ? vm.XSpeed : vm.YSpeed;
                 return vm.upa.MoveRelative(axis, speed, arcmin, token);
             }
+
+            /// <summary>
+            /// The controller keeps a machine position and reports it on request, so the
+            /// status is refreshed rather than read from whatever the last move left behind.
+            /// </summary>
+            public async Task<float?> ReadPosition(Axis axis, CancellationToken token) {
+                await vm.upa.RefreshStatus(token).ConfigureAwait(false);
+                return axis == Axis.XAxis ? vm.upa.XPosition1 : vm.upa.YPosition1;
+            }
+
+            public Task MoveAbsolute(Axis axis, float position, CancellationToken token) {
+                var speed = axis == Axis.XAxis ? vm.XSpeed : vm.YSpeed;
+                return vm.upa.MoveAbsolute(axis, speed, position, token);
+            }
         }
 
         [RelayCommand(CanExecute = nameof(CanCalibrate))]
