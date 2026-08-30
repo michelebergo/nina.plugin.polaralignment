@@ -122,9 +122,15 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
 
         [RelayCommand(CanExecute = nameof(CanStopMotion))]
         private void StopMotion() {
-            if (upa is UniversalPolarAlignmentOAPA oapa) {
-                oapa.RequestStop();
-            }
+            if (upa is not UniversalPolarAlignmentOAPA oapa) { return; }
+            if (oapa.TryRequestStop()) { return; }
+
+            // The one button whose failure must never be quiet. Somebody pressing Stop is
+            // watching the platform go somewhere they do not want it to go, and a halt that
+            // did not reach the controller looks exactly like one that did: nothing happens
+            // on screen either way, except that in one case the axis is still moving.
+            Notification.ShowError("Stop was not delivered to the controller - the axis may still be moving. "
+                + "Check the connection, and cut power to the controller if it does not stop.");
         }
 
         protected override string SystemName => "OAPA System";
@@ -198,6 +204,24 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
         /// <summary>Why the last calibration is not trusted; empty when it is.</summary>
         public string CalibrationTrustNote => Properties.Settings.Default.OAPACalibrationTrustNote;
 
+        /// <summary>
+        /// What a hand-entered value costs, applied from every setter that can receive one.
+        ///
+        /// Two things, and the second was missing. The trust the last calibration earned is
+        /// withdrawn, because the measurement that earned it has just been replaced. And a
+        /// pending Apply confirmation is cancelled, because it no longer describes anything
+        /// real: that prompt names the values it is about to overwrite, so an edit made while
+        /// it is up leaves the user one press away from confirming a sentence about numbers
+        /// that are no longer there. The gate exists to protect deliberate values, and typing
+        /// one in while it is asking is the most deliberate act available - it must not be the
+        /// act that switches the gate off.
+        /// </summary>
+        private void OnManualEdit(OapaParameterSource source) {
+            if (source != OapaParameterSource.Manual) { return; }
+            SetCalibrationTrust(false, "a factor or backlash value was edited by hand after the last calibration");
+            ApplyConfirmationPending = false;
+        }
+
         private void SetCalibrationTrust(bool trusted, string note) {
             if (Properties.Settings.Default.OAPACalibrationTrusted == trusted
                 && Properties.Settings.Default.OAPACalibrationTrustNote == note) {
@@ -229,9 +253,7 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
             // A value typed by hand carries no verdict: the measurement that earned the
             // trust has just been replaced, so whatever it authorised is withdrawn until the
             // next calibration earns it again. Same rule the home position follows.
-            if (source == OapaParameterSource.Manual) {
-                SetCalibrationTrust(false, "a factor or backlash value was edited by hand after the last calibration");
-            }
+            OnManualEdit(source);
             value = System.Math.Clamp(value, MinimumFactor, MaximumFactor);
             Properties.Settings.Default.OAPAXGearRatio = value;
             Properties.Settings.Default.OAPAXGearRatioSource = source.ToString();
@@ -279,9 +301,7 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
             // A value typed by hand carries no verdict: the measurement that earned the
             // trust has just been replaced, so whatever it authorised is withdrawn until the
             // next calibration earns it again. Same rule the home position follows.
-            if (source == OapaParameterSource.Manual) {
-                SetCalibrationTrust(false, "a factor or backlash value was edited by hand after the last calibration");
-            }
+            OnManualEdit(source);
             value = System.Math.Clamp(value, MinimumFactor, MaximumFactor);
             Properties.Settings.Default.OAPAYGearRatio = value;
             Properties.Settings.Default.OAPAYGearRatioSource = source.ToString();
@@ -332,9 +352,7 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
             // A value typed by hand carries no verdict: the measurement that earned the
             // trust has just been replaced, so whatever it authorised is withdrawn until the
             // next calibration earns it again. Same rule the home position follows.
-            if (source == OapaParameterSource.Manual) {
-                SetCalibrationTrust(false, "a factor or backlash value was edited by hand after the last calibration");
-            }
+            OnManualEdit(source);
             value = System.Math.Clamp(value, 0f, MaximumBacklashArcmin);
             Properties.Settings.Default.OAPAXBacklashCompensation = value;
             Properties.Settings.Default.OAPAXBacklashSource = source.ToString();
@@ -355,9 +373,7 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
             // A value typed by hand carries no verdict: the measurement that earned the
             // trust has just been replaced, so whatever it authorised is withdrawn until the
             // next calibration earns it again. Same rule the home position follows.
-            if (source == OapaParameterSource.Manual) {
-                SetCalibrationTrust(false, "a factor or backlash value was edited by hand after the last calibration");
-            }
+            OnManualEdit(source);
             value = System.Math.Clamp(value, 0f, MaximumBacklashArcmin);
             Properties.Settings.Default.OAPAYBacklashCompensation = value;
             Properties.Settings.Default.OAPAYBacklashSource = source.ToString();
@@ -386,9 +402,7 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
             // A value typed by hand carries no verdict: the measurement that earned the
             // trust has just been replaced, so whatever it authorised is withdrawn until the
             // next calibration earns it again. Same rule the home position follows.
-            if (source == OapaParameterSource.Manual) {
-                SetCalibrationTrust(false, "a factor or backlash value was edited by hand after the last calibration");
-            }
+            OnManualEdit(source);
             value = System.Math.Clamp(value, 0f, MaximumBacklashArcmin);
             Properties.Settings.Default.OAPAXBacklashCompensationNegative = value;
             Properties.Settings.Default.OAPAXBacklashSource = source.ToString();
@@ -409,9 +423,7 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
             // A value typed by hand carries no verdict: the measurement that earned the
             // trust has just been replaced, so whatever it authorised is withdrawn until the
             // next calibration earns it again. Same rule the home position follows.
-            if (source == OapaParameterSource.Manual) {
-                SetCalibrationTrust(false, "a factor or backlash value was edited by hand after the last calibration");
-            }
+            OnManualEdit(source);
             value = System.Math.Clamp(value, 0f, MaximumBacklashArcmin);
             Properties.Settings.Default.OAPAYBacklashCompensationNegative = value;
             Properties.Settings.Default.OAPAYBacklashSource = source.ToString();
@@ -952,6 +964,12 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
         public bool CanSetHome() => Connected && IsNotMoving;
         public bool CanGoHome() => Connected && IsNotMoving && HasHome;
 
+        /// <summary>Which axes made it, for a move to home that did not complete.</summary>
+        internal static string Arrived(bool azimuthArrived)
+            => azimuthArrived
+                ? "azimuth reached home, altitude did not"
+                : "neither axis reached home";
+
         private void RefreshHomeDisplay() {
             if (!HasHome) { return; }
             HomeX = homeXController / XGearRatio;
@@ -971,17 +989,23 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
 
         [RelayCommand(CanExecute = nameof(CanGoHome))]
         public async Task GoHome(CancellationToken token) {
+            var azimuthArrived = false;
             try {
                 await RunOnUi(() => IsNotMoving = false);
                 var targetX = homeXController / XGearRatio;
                 var targetY = homeYController / YGearRatio;
                 Logger.Info($"OAPA moving to home position X={targetX:F2}, Y={targetY:F2} (controller {homeXController:F0}/{homeYController:F0})");
                 await upa.MoveAbsolute(Axis.XAxis, XSpeed, targetX, token).ConfigureAwait(false);
+                azimuthArrived = true;
                 await upa.MoveAbsolute(Axis.YAxis, YSpeed, targetY, token).ConfigureAwait(false);
             } catch (OperationCanceledException) {
+                // The axes are driven one after the other, so a stop between them leaves the
+                // platform at home in azimuth and wherever it stood in altitude. Saying nothing
+                // leaves somebody looking at a rig that is half where they asked for.
+                Logger.Info($"OAPA move to home cancelled; {Arrived(azimuthArrived)}");
             } catch (Exception ex) {
                 Logger.Error(ex);
-                Notification.ShowError($"Failed to move to home position: {ex.Message}");
+                Notification.ShowError($"Failed to move to home position: {ex.Message} ({Arrived(azimuthArrived)})");
             } finally {
                 await RunOnUi(() => IsNotMoving = true);
             }
@@ -1008,6 +1032,30 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
 
         [ObservableProperty]
         private float discoveredYRatio;
+
+        // The Reverse flags the pass ended up agreeing with, held here rather than written
+        // when the flip is discovered.
+        //
+        // They used to be persisted the moment an axis came back flipped, which is halfway
+        // through a run: cancel during the second axis, read "Cancelled", and a saved setting
+        // had changed anyway. Every other measured value waits for Apply - which even asks a
+        // second time before overwriting something entered by hand - so this was the one
+        // quantity the panel changed behind the user.
+        //
+        // And the flag is not separable from the factor. A flipped axis is measured by a
+        // second pass run with the direction reversed, so the ratio in the outcome is the
+        // ratio *under that flag*. Applying one without the other leaves the axis corrected by
+        // a number measured in the opposite direction, which is the state a run abandoned
+        // before Apply used to leave behind.
+        //
+        // Nothing during the run depends on them: the service takes the direction as a
+        // parameter and flips it internally for its own retry, and the motion layer never
+        // reads these settings.
+        [ObservableProperty]
+        private bool discoveredReverseAzimuth;
+
+        [ObservableProperty]
+        private bool discoveredReverseAltitude;
 
         // The discovered backlash is per direction: these hold the positive one, the pair
         // below the negative one. They are equal on a symmetric axis.
@@ -1127,20 +1175,49 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
 
         [RelayCommand(CanExecute = nameof(CanCalibrate))]
         public Task CalibrateGearRatios(CancellationToken token) {
+            // Claimed here, synchronously, before anything is scheduled.
+            //
+            // The body below runs on a worker, so a flag raised inside it is raised some time
+            // after the click. Until then CanCalibrate still answers yes and the button is
+            // still live, and a second press starts a second pass over the same two axes: two
+            // sequences interleaving moves on the same hardware, each measuring the other's
+            // displacements. The camera check is not a guard against this - it is asked with
+            // this panel's own token, which its own block does not make busy, and it answers
+            // yes outright when there is no camera mediator at all.
+            //
+            // Commands are invoked on the UI thread, so a plain check and set is enough; what
+            // it must not be is asynchronous.
+            if (CalibrationRunning) {
+                Logger.Info("OAPA self-calibration already running; ignoring the repeated request");
+                return Task.CompletedTask;
+            }
+            CalibrationRunning = true;
+            IsNotMoving = false;
+            // Withdrawn here for the same reason, and it is the one with teeth. Apply is gated
+            // on a result being available, and the previous run's result is still available
+            // until this one clears it. Clearing it on the worker leaves a window where Apply
+            // is live while a pass is already measuring - and Apply writes the gear ratio
+            // straight through to the controller, so the sequence would carry on dividing its
+            // displacements by a factor that changed underneath it.
+            HasCalibrationResult = false;
+
             return Task.Run(async () => {
                 // CanExecute is evaluated at UI time; re-check here so a sequence or another
                 // TPPA run that acquired the camera in the meantime cannot be interrupted.
                 if (!CameraIsFree()) {
                     Logger.Warning("OAPA self-calibration refused: another consumer owns the camera");
                     Notification.ShowWarning("Cannot calibrate: the camera is in use by a sequence or another imaging process.");
-                    await RunOnUi(() => CalibrationStatus = "Camera busy - calibration not started");
+                    await RunOnUi(() => {
+                        CalibrationStatus = "Camera busy - calibration not started";
+                        CalibrationRunning = false;
+                        IsNotMoving = true;
+                    });
                     return;
                 }
                 cameraMediator?.RegisterCaptureBlock(cameraBlockToken);
                 try {
                     await RunOnUi(() => {
-                        IsNotMoving = false;
-                        CalibrationRunning = true;
+                        // CalibrationRunning and IsNotMoving are already claimed above.
                         HasCalibrationResult = false;
                         CalibrationDirectionalBacklash = false;
                         ApplyConfirmationPending = false;
@@ -1158,20 +1235,16 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
 
                     var x = await service.CalibrateAxisWithAutoReverse(
                         Axis.XAxis, XGearRatio, ReverseAzimuth, "X (Azimuth)", reportStatus, token);
-                    if (x.Flipped) {
-                        await RunOnUi(() => ReverseAzimuth = !ReverseAzimuth);
-                    }
+                    var reverseAzimuthFound = x.Flipped ? !ReverseAzimuth : ReverseAzimuth;
                     var y = await service.CalibrateAxisWithAutoReverse(
                         Axis.YAxis, YGearRatio, ReverseAltitude, "Y (Altitude)", reportStatus, token);
-                    if (y.Flipped) {
-                        await RunOnUi(() => ReverseAltitude = !ReverseAltitude);
-                    }
+                    var reverseAltitudeFound = y.Flipped ? !ReverseAltitude : ReverseAltitude;
 
                     string consistencyMsg;
                     if (x.Consistent && y.Consistent) {
                         var notes = new List<string>();
-                        if (x.Flipped) { notes.Add("Reverse Az auto-corrected"); }
-                        if (y.Flipped) { notes.Add("Reverse Alt auto-corrected"); }
+                        if (x.Flipped) { notes.Add("Reverse Az to be corrected on Apply"); }
+                        if (y.Flipped) { notes.Add("Reverse Alt to be corrected on Apply"); }
                         consistencyMsg = notes.Count == 0
                             ? "Direction consistency: OK"
                             : "Direction consistency: OK (" + string.Join(", ", notes) + ")";
@@ -1207,6 +1280,8 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
                     await RunOnUi(() => {
                         DiscoveredXRatio = x.Ratio;
                         DiscoveredYRatio = y.Ratio;
+                        DiscoveredReverseAzimuth = reverseAzimuthFound;
+                        DiscoveredReverseAltitude = reverseAltitudeFound;
                         DiscoveredXBacklash = x.BacklashEnteringPositiveArcmin;
                         DiscoveredYBacklash = y.BacklashEnteringPositiveArcmin;
                         DiscoveredXBacklashNegative = x.BacklashEnteringNegativeArcmin;
@@ -1269,8 +1344,25 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
         private static string Pair(float positive, float negative)
             => positive == negative ? $"{positive:F2}'" : $"+{positive:F2}'/-{negative:F2}'";
 
+        /// <summary>
+        /// What an Apply that died partway has to add to its own failure message.
+        ///
+        /// These settings are persisted one at a time, so "Failed to apply calibration" is
+        /// only the whole truth when nothing was written. Told that alone, a user reasonably
+        /// concludes their configuration is untouched and carries on with a platform whose
+        /// direction has changed and whose factor has not - which is the one half-state that
+        /// makes an axis correct the wrong way.
+        /// </summary>
+        internal static string PartialApplyNote(IReadOnlyList<string> committed)
+            => committed.Count == 0
+                ? string.Empty
+                : $" Already applied before the failure: {string.Join(", ", committed)}. Re-run the calibration.";
+
         [RelayCommand(CanExecute = nameof(CanApplyCalibration))]
         public void ApplyCalibration() {
+            // What has actually been written, so a failure partway can say so instead of
+            // reporting a clean "failed" over settings that already changed.
+            var committed = new List<string>();
             try {
                 // Manual values are deliberate user decisions: name them and require a
                 // second Apply instead of overwriting silently.
@@ -1303,12 +1395,30 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
                 Properties.Settings.Default.OAPAXCalibrationNoise = DiscoveredXNoise;
                 Properties.Settings.Default.OAPAYCalibrationNoise = DiscoveredYNoise;
 
+                // Before the factors, and it has to be: each factor was measured under the
+                // direction the pass settled on, so a factor applied while the axis still
+                // carries the other direction is a correction scaled by a number measured
+                // going the other way.
+                // Order matters if this sequence dies partway, which it can: each setter
+                // persists, and persistence can fail. Of the two possible half-states, this is
+                // the survivable one. A direction applied without its factor corrects the right
+                // way by the wrong amount; a factor applied without its direction corrects the
+                // wrong way by the right amount, and an axis correcting the wrong way does not
+                // converge slowly - it accelerates away. So the direction goes first, and what
+                // got as far as being written is named in the failure below.
+                var azimuthFlips = ReverseAzimuth != DiscoveredReverseAzimuth;
+                var altitudeFlips = ReverseAltitude != DiscoveredReverseAltitude;
+                if (azimuthFlips) { ReverseAzimuth = DiscoveredReverseAzimuth; committed.Add("Reverse Az"); }
+                if (altitudeFlips) { ReverseAltitude = DiscoveredReverseAltitude; committed.Add("Reverse Alt"); }
+
                 SetXGearRatio(DiscoveredXRatio, OapaParameterSource.Calibrated);
                 SetYGearRatio(DiscoveredYRatio, OapaParameterSource.Calibrated);
+                committed.Add("factors");
                 SetXBacklash(xPositive, OapaParameterSource.Calibrated);
                 SetYBacklash(yPositive, OapaParameterSource.Calibrated);
                 SetXBacklashNegative(xNegative, OapaParameterSource.Calibrated);
                 SetYBacklashNegative(yNegative, OapaParameterSource.Calibrated);
+                committed.Add("backlash");
                 // Applying the calibration includes picking the backlash strategy the
                 // measurements call for; the change is stated explicitly, never silent.
                 XBacklashMode = BacklashModePlanner.Recommend(DiscoveredXBacklash, DiscoveredXBacklashNegative, DiscoveredXNoise);
@@ -1323,12 +1433,25 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
                 // line stating the measured split next to a line saying the mean was applied reads
                 // as a contradiction, and the panel's reader has no way to tell which one the axis
                 // is now using.
-                CalibrationStatus = $"Applied. Backlash mode set to X: {XBacklashMode}, Y: {YBacklashMode} (applied X {Pair(xPositive, xNegative)}, Y {Pair(yPositive, yNegative)})";
-                Logger.Info($"OAPA calibration applied: X={DiscoveredXRatio:F2}, Y={DiscoveredYRatio:F2}, backlash X={Pair(xPositive, xNegative)}, Y={Pair(yPositive, yNegative)}, modes X={XBacklashMode}, Y={YBacklashMode}");
+                // A flipped direction is named where it is applied. It is the one change here
+                // that alters which way the axis moves, so leaving it to be inferred from a
+                // checkbox that quietly changed is the same silence this used to have.
+                var flips = new List<string>();
+                if (azimuthFlips) { flips.Add($"Reverse Az -> {DiscoveredReverseAzimuth}"); }
+                if (altitudeFlips) { flips.Add($"Reverse Alt -> {DiscoveredReverseAltitude}"); }
+                var flipNote = flips.Count == 0 ? string.Empty : $", {string.Join(", ", flips)}";
+
+                CalibrationStatus = $"Applied. Backlash mode set to X: {XBacklashMode}, Y: {YBacklashMode} (applied X {Pair(xPositive, xNegative)}, Y {Pair(yPositive, yNegative)}{flipNote})";
+                Logger.Info($"OAPA calibration applied: X={DiscoveredXRatio:F2}, Y={DiscoveredYRatio:F2}, backlash X={Pair(xPositive, xNegative)}, Y={Pair(yPositive, yNegative)}, modes X={XBacklashMode}, Y={YBacklashMode}{flipNote}");
                 Notification.ShowInformation($"Calibration applied. Backlash mode X: {XBacklashMode}, Y: {YBacklashMode}", TimeSpan.FromSeconds(30));
             } catch (Exception ex) {
                 Logger.Error(ex);
-                Notification.ShowError($"Failed to apply calibration: {ex.Message}");
+                // "Failed" on its own is only true if nothing was written. These settings are
+                // persisted one at a time, so a failure partway leaves some of them applied,
+                // and a user told the apply failed would reasonably assume none of it took.
+                var partial = PartialApplyNote(committed);
+                Notification.ShowError($"Failed to apply calibration: {ex.Message}.{partial}");
+                CalibrationStatus = $"Apply failed: {ex.Message}.{partial}";
             }
         }
 
@@ -1429,6 +1552,11 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
             DiscoveredYBacklash = 0;
             DiscoveredXBacklashNegative = 0;
             DiscoveredYBacklashNegative = 0;
+            // Back to what the axes are actually configured with, not to false: discarding a
+            // result must leave nothing behind that a later Apply could pick up, and these two
+            // are the only discovered values whose "empty" is a legitimate setting.
+            DiscoveredReverseAzimuth = ReverseAzimuth;
+            DiscoveredReverseAltitude = ReverseAltitude;
             HasCalibrationResult = false;
             ApplyConfirmationPending = false;
             CalibrationConsistencyMessage = string.Empty;
