@@ -22,6 +22,18 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
         private static readonly object gate = new();
 
         /// <summary>
+        /// Whether schema 0 is carrying a direction split to undo, or is simply a profile that
+        /// has never run this plugin.
+        ///
+        /// The two arrive here identically - schema 0 is also the factory value - and they must
+        /// not be told the same story. Announcing a repair to somebody who has never calibrated
+        /// says a previous release left them a bad value and asks them to re-run something they
+        /// have never run. The schema moves either way; only the claim is conditional.
+        /// </summary>
+        internal static bool HadStoredPair(float storedX, float storedY)
+            => storedX != NotSet || storedY != NotSet;
+
+        /// <summary>
         /// Brings the persisted parameters up to the current schema. Idempotent and cheap;
         /// call it from anywhere that is about to read them.
         /// </summary>
@@ -55,15 +67,26 @@ namespace NINA.Plugins.PolarAlignment.OAPA {
                 // "not set", which makes both axes symmetric again and restores the behaviour
                 // of the release before the pair existed. One Self-Calibration and Apply
                 // re-establishes a genuine directional pair on the rigs that have one.
+                // Schema 0 is also what a machine that has never run this plugin carries, and
+                // the two cases must not be told the same story. On a fresh profile both
+                // directions already hold the sentinel, so there is nothing to repair - and
+                // announcing a repair to somebody who has never calibrated tells them a
+                // previous release left them a bad value and that they should re-run something
+                // they have never run. The schema still moves; only the claim is withheld.
+                var hadStoredPair = HadStoredPair(settings.OAPAXBacklashCompensationNegative,
+                                                  settings.OAPAYBacklashCompensationNegative);
+
                 settings.OAPAXBacklashCompensationNegative = NotSet;
                 settings.OAPAYBacklashCompensationNegative = NotSet;
                 settings.OAPABacklashPairSchema = ProjectionCorrectedCalibration;
                 settings.Save();
 
-                NINA.Core.Utility.Logger.Info(
-                    "OAPA: per-direction backlash reset to symmetric - the previous release stored a direction " +
-                    "difference the calibration had not established, which biases every reversal. " +
-                    "Re-run the Self-Calibration and Apply to measure it again.");
+                if (hadStoredPair) {
+                    NINA.Core.Utility.Logger.Info(
+                        "OAPA: per-direction backlash reset to symmetric - the previous release stored a direction " +
+                        "difference the calibration had not established, which biases every reversal. " +
+                        "Re-run the Self-Calibration and Apply to measure it again.");
+                }
             }
         }
     }
